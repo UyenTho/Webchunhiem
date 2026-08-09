@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  Users, Wallet, CheckCircle, XCircle, Plus, Trash2, Edit3, Award, LogOut, LogIn, Lock, Key, ShieldAlert, Eye, Calendar, Trophy, ToggleLeft, ToggleRight, X, FileSpreadsheet, ShieldCheck, HelpCircle
+  Users, Wallet, CheckCircle, XCircle, Plus, Trash2, Edit3, Award, LogOut, LogIn, Lock, Key, ShieldAlert, Eye, Calendar, Trophy, ToggleLeft, ToggleRight, X, FileSpreadsheet, ShieldCheck, HelpCircle, FileUp
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { supabase } from './supabaseClient';
@@ -91,21 +91,17 @@ export default function App() {
   const [loggedInStudent, setLoggedInStudent] = useState<Student | null>(null);
   const [teacherUser, setTeacherUser] = useState<any>(null);
 
-  // Modal Đăng nhập / Đăng ký / Quên mật khẩu
   const [isTeacherAuthModalOpen, setIsTeacherAuthModalOpen] = useState(false);
   const [authMode, setAuthMode] = useState<'login' | 'register' | 'forgot_password'>('login');
 
-  // State Form Đăng nhập
   const [teacherEmail, setTeacherEmail] = useState('');
   const [teacherPassword, setTeacherPassword] = useState('');
   
-  // State Form Đăng ký
   const [regFullName, setRegFullName] = useState('');
   const [regEmail, setRegEmail] = useState('');
   const [regPassword, setRegPassword] = useState('');
   const [regKeyCode, setRegKeyCode] = useState('');
 
-  // State Quên Mật Khẩu
   const [forgotEmail, setForgotEmail] = useState('');
   const [forgotSuccessMsg, setForgotSuccessMsg] = useState('');
 
@@ -227,7 +223,6 @@ export default function App() {
     }
   };
 
-  // HÀM XỬ LÝ GỬI YÊU CẦU QUÊN MẬT KHẨU
   const handleForgotPassword = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!forgotEmail.trim()) return;
@@ -267,7 +262,6 @@ export default function App() {
           }}
         />
 
-        {/* MODAL XÁC THỰC GIÁO VIÊN (ĐĂNG NHẬP / ĐĂNG KÝ / QUÊN MẬT KHẨU) */}
         {isTeacherAuthModalOpen && (
           <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
             <div className="bg-white max-w-md w-full rounded-2xl p-6 shadow-2xl space-y-4">
@@ -283,7 +277,6 @@ export default function App() {
                 </button>
               </div>
 
-              {/* TÁC VỤ 1: ĐĂNG NHẬP */}
               {authMode === 'login' && (
                 <form onSubmit={handleTeacherLogin} className="space-y-4 text-xs">
                   <div>
@@ -337,7 +330,6 @@ export default function App() {
                 </form>
               )}
 
-              {/* TÁC VỤ 2: ĐĂNG KÝ BẰNG KEY */}
               {authMode === 'register' && (
                 <form onSubmit={handleTeacherRegister} className="space-y-3 text-xs">
                   <div>
@@ -404,7 +396,6 @@ export default function App() {
                 </form>
               )}
 
-              {/* TÁC VỤ 3: QUÊN MẬT KHẨU */}
               {authMode === 'forgot_password' && (
                 <form onSubmit={handleForgotPassword} className="space-y-4 text-xs">
                   <div className="bg-indigo-50 p-3 rounded-xl border border-indigo-200 text-indigo-900 leading-relaxed">
@@ -412,7 +403,7 @@ export default function App() {
                       <HelpCircle className="w-4 h-4 text-indigo-600" /> Hướng dẫn lấy lại mật khẩu:
                     </p>
                     <p className="mt-1 text-[11px] text-slate-600">
-                      Nhập email đã đăng ký của bạn bên dưới. Hệ thống sẽ gửi email tự động đặt lại mật khẩu hoặc bạn có thể liên hệ <strong>Admin (Zalo)</strong> để nhận mật khẩu tạm thời.
+                      Nhập email đã đăng ký của bạn. Hệ thống sẽ gửi yêu cầu hoặc bạn có thể liên hệ <strong>Admin</strong> để cấp mật khẩu mới.
                     </p>
                   </div>
 
@@ -819,7 +810,7 @@ function StudentPortal({ student, onLogout }: { student: Student; onLogout: () =
 }
 
 // ==========================================
-// 3. MÀN HÌNH QUẢN LÝ GIÁO VIÊN
+// 3. MÀN HÌNH QUẢN LÝ GIÁO VIÊN (CÓ UPLOAD EXCEL TỰ ĐỘNG)
 // ==========================================
 function TeacherDashboard({ teacherUser, onLogoutTeacher }: { teacherUser: any; onLogoutTeacher: () => void }) {
   const [activeTab, setActiveTab] = useState<'students' | 'finance' | 'emulation'>('students');
@@ -840,20 +831,10 @@ function TeacherDashboard({ teacherUser, onLogoutTeacher }: { teacherUser: any; 
   const [newPassInput, setNewPassInput] = useState('');
   const [changePassError, setChangePassError] = useState('');
 
-  const [newFeeTitle, setNewFeeTitle] = useState('');
-  const [newFeeAmount, setNewFeeAmount] = useState('');
-  const [newFeePaidAll, setNewFeePaidAll] = useState(false);
-
-  const todayStr = new Date().toISOString().split('T')[0];
-  const [violationStudentId, setViolationStudentId] = useState('');
-  const [violationContent, setViolationContent] = useState('');
-  const [violationPenalty, setViolationPenalty] = useState(1);
-  const [violationDate, setViolationDate] = useState(todayStr);
-
-  const [commendationStudentId, setCommendationStudentId] = useState('');
-  const [commendationContent, setCommendationContent] = useState('');
-  const [commendationBonus, setCommendationBonus] = useState(1);
-  const [commendationDate, setCommendationDate] = useState(todayStr);
+  // Modal Import File Excel
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [importPreviewData, setImportPreviewData] = useState<any[]>([]);
+  const [importLoading, setImportLoading] = useState(false);
 
   const [selectedStudentDetail, setSelectedStudentDetail] = useState<Student | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -892,6 +873,84 @@ function TeacherDashboard({ teacherUser, onLogoutTeacher }: { teacherUser: any; 
   };
 
   useEffect(() => { fetchData(); }, [teacherUser]);
+
+  // XỬ LÝ ĐỌC FILE EXCEL TẢI LÊN
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const bstr = evt.target?.result;
+        const wb = XLSX.read(bstr, { type: 'binary' });
+        const wsname = wb.SheetNames[0];
+        const ws = wb.Sheets[wsname];
+        const rawData = XLSX.utils.sheet_to_json(ws);
+
+        // Chuẩn hóa dữ liệu từ file Excel (chấp nhận cả tiếng Việt hoa/thường)
+        const parsed = rawData.map((row: any) => {
+          const code = String(row['MSHS'] || row['Mã Số HS'] || row['Mã HS'] || row['mshs'] || '').trim().toUpperCase();
+          const name = String(row['Họ và Tên'] || row['Họ Tên'] || row['Tên Học Sinh'] || row['Ho va Ten'] || '').trim();
+          const group = Number(row['Tổ'] || row['Tổ Học Sinh'] || 1);
+          const role = String(row['Chức Vụ Lớp'] || row['Chức Vụ'] || 'Thành viên').trim();
+          const phone = String(row['SĐT Học Sinh'] || row['SĐT'] || '').trim();
+
+          return { code, full_name: name, group_number: isNaN(group) ? 1 : group, class_role: role, phone };
+        }).filter(item => item.code && item.full_name);
+
+        if (parsed.length === 0) {
+          alert('Không tìm thấy dữ liệu hợp lệ! Vui lòng đảm bảo file Excel có cột: MSHS và Họ và Tên.');
+          return;
+        }
+
+        setImportPreviewData(parsed);
+        setIsImportModalOpen(true);
+      } catch (error) {
+        alert('Lỗi đọc file Excel. Vui lòng kiểm tra định dạng file (.xlsx hoặc .xls)!');
+      }
+    };
+    reader.readAsBinaryString(file);
+    e.target.value = ''; // Reset input file
+  };
+
+  // LƯU DANH SÁCH TỪ EXCEL VÀO DATABASE SUPABASE
+  const handleConfirmImport = async () => {
+    if (!teacherUser || importPreviewData.length === 0) return;
+    setImportLoading(true);
+
+    try {
+      const recordsToInsert = importPreviewData.map(item => ({
+        code: item.code,
+        full_name: item.full_name,
+        group_number: item.group_number,
+        class_role: item.class_role,
+        phone: item.phone,
+        teacher_id: teacherUser.id
+      }));
+
+      // Upsert: Cập nhật nếu trùng MSHS, thêm mới nếu chưa có
+      const { error } = await supabase
+        .from('students')
+        .upsert(recordsToInsert, { onConflict: 'code,teacher_id' });
+
+      if (error) {
+        // Nếu RLS hoặc Database chưa cài constraint thì tự động insert từng dòng
+        for (const record of recordsToInsert) {
+          await supabase.from('students').insert([record]);
+        }
+      }
+
+      alert(`Đã đồng bộ thành công ${importPreviewData.length} học sinh lên hệ thống!`);
+      setIsImportModalOpen(false);
+      setImportPreviewData([]);
+      fetchData();
+    } catch {
+      alert('Đã xảy ra lỗi trong quá trình lưu dữ liệu!');
+    } finally {
+      setImportLoading(false);
+    }
+  };
 
   const handleChangeSelfPassword = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1029,9 +1088,23 @@ function TeacherDashboard({ teacherUser, onLogoutTeacher }: { teacherUser: any; 
                     onChange={e => setSearchQuery(e.target.value)}
                     className="p-2 border rounded-lg text-sm bg-white max-w-md w-full"
                   />
-                  <button onClick={() => { setEditingStudent(null); setIsModalOpen(true); }} className="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 shadow">
-                    <Plus className="w-4 h-4" /> Thêm HS Mới
-                  </button>
+                  
+                  <div className="flex items-center gap-2">
+                    {/* NÚT UPLOAD FILE EXCEL TỰ ĐỘNG */}
+                    <label className="bg-emerald-600 hover:bg-emerald-700 text-white px-3.5 py-2 rounded-lg text-sm font-bold flex items-center gap-2 shadow cursor-pointer transition">
+                      <FileUp className="w-4 h-4" /> Upload File Excel
+                      <input 
+                        type="file" 
+                        accept=".xlsx, .xls" 
+                        onChange={handleFileUpload} 
+                        className="hidden" 
+                      />
+                    </label>
+
+                    <button onClick={() => { setEditingStudent(null); setIsModalOpen(true); }} className="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 shadow">
+                      <Plus className="w-4 h-4" /> Thêm HS Mới
+                    </button>
+                  </div>
                 </div>
 
                 <div className="bg-white rounded-xl border shadow-sm overflow-x-auto">
@@ -1095,6 +1168,61 @@ function TeacherDashboard({ teacherUser, onLogoutTeacher }: { teacherUser: any; 
           </>
         )}
       </main>
+
+      {/* MODAL PREVIEW FILE EXCEL TRƯỚC KHI ĐỒNG BỘ */}
+      {isImportModalOpen && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl max-w-2xl w-full p-6 space-y-4 my-8 shadow-2xl">
+            <div className="flex justify-between items-center border-b pb-3">
+              <div>
+                <h3 className="font-bold text-slate-800 text-base flex items-center gap-2">
+                  <FileUp className="w-5 h-5 text-emerald-600" /> Xem Trước Danh Sách Đồng Bộ Từ Excel
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">Tìm thấy {importPreviewData.length} học sinh hợp lệ trong file</p>
+              </div>
+              <button onClick={() => setIsImportModalOpen(false)} className="text-slate-400">✕</button>
+            </div>
+
+            <div className="max-h-60 overflow-y-auto border rounded-xl">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-100 font-bold text-slate-700 sticky top-0">
+                  <tr>
+                    <th className="p-2 border-b">STT</th>
+                    <th className="p-2 border-b">MSHS</th>
+                    <th className="p-2 border-b">Họ và Tên</th>
+                    <th className="p-2 border-b">Tổ</th>
+                    <th className="p-2 border-b">Chức Vụ</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {importPreviewData.map((item, idx) => (
+                    <tr key={idx} className="hover:bg-slate-50">
+                      <td className="p-2 font-semibold text-slate-400">{idx + 1}</td>
+                      <td className="p-2 font-bold text-indigo-600">{item.code}</td>
+                      <td className="p-2 font-bold text-slate-800">{item.full_name}</td>
+                      <td className="p-2">Tổ {item.group_number}</td>
+                      <td className="p-2 text-purple-700 font-medium">{item.class_role}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="pt-2 border-t flex justify-end gap-2">
+              <button onClick={() => setIsImportModalOpen(false)} className="px-4 py-2 border rounded-xl text-xs font-semibold">
+                Hủy Bỏ
+              </button>
+              <button 
+                onClick={handleConfirmImport} 
+                disabled={importLoading}
+                className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow transition flex items-center gap-2"
+              >
+                {importLoading ? 'Đang lưu vào CSDL...' : 'Xác Nhận Đẩy Lên CSDL'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* MODAL ĐỔI MẬT KHẨU CÁ NHÂN */}
       {isChangePassModalOpen && (

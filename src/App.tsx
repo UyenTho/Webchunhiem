@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { 
-  Users, Wallet, CheckCircle, XCircle, Plus, Trash2, Edit3, Award, LogOut, LogIn, Lock, Key, ShieldAlert, Eye, Calendar, Trophy, ToggleLeft, ToggleRight, X, FileSpreadsheet, ShieldCheck, FileUp, Sparkles, Send, Check
+  Users, Wallet, CheckCircle, XCircle, Plus, Trash2, Edit3, Award, LogOut, LogIn, Lock, Key, ShieldAlert, Eye, Calendar, Trophy, ToggleLeft, ToggleRight, X, FileSpreadsheet, ShieldCheck, FileUp, Sparkles, Send, Check, Gift
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
@@ -118,16 +118,15 @@ export default function App() {
 
   return (
     <div>
-      {/* BANNER THÔNG BÁO WEB DEMO */}
-      <div className="bg-gradient-to-r from-amber-500 via-indigo-600 to-purple-600 text-white text-xs py-2 px-4 font-bold flex justify-between items-center shadow-md flex-wrap gap-2">
+      {/* THANH CHUYỂN ĐỔI GIAO DIỆN */}
+      <div className="bg-gradient-to-r from-indigo-700 via-indigo-600 to-purple-600 text-white text-xs py-2 px-4 font-bold flex justify-between items-center shadow-md flex-wrap gap-2">
         <span className="flex items-center gap-1.5">
-          <Sparkles className="w-4 h-4 text-amber-200 animate-pulse" /> 
-          BẢN WEB DEMO TRẢI NGHIỆM (Thực hiện thao tác trực tiếp - Không cần đăng nhập)
+          <Sparkles className="w-4 h-4 text-amber-200" /> Quản Lý Lớp Chủ Nhiệm
         </span>
         <div className="flex items-center gap-2">
           <button 
             onClick={() => setCurrentView(currentView === 'teacher' ? 'student_login' : 'teacher')} 
-            className="bg-white text-indigo-900 px-3 py-1 rounded-full text-[11px] font-extrabold hover:bg-amber-100 transition shadow"
+            className="bg-white text-indigo-900 px-3 py-1 rounded-full text-[11px] font-extrabold hover:bg-indigo-50 transition shadow"
           >
             {currentView === 'teacher' ? '👉 Xem Giao Diện Học Sinh' : '👉 Quay Lại Màn Hình Giáo Viên'}
           </button>
@@ -156,7 +155,7 @@ export default function App() {
           onSaveSurvey={(updatedStudent) => {
             setStudents(students.map(s => s.id === updatedStudent.id ? updatedStudent : s));
             setLoggedInStudent(updatedStudent);
-            alert('Đã nộp phiếu khảo sát thử nghiệm!');
+            alert('Đã nộp phiếu khảo sát thành công!');
           }}
           onLogout={() => setCurrentView('student_login')}
         />
@@ -182,7 +181,7 @@ export default function App() {
   );
 }
 
-// 1. MÀN HÌNH ĐĂNG NHẬP HỌC SINH (DEMO)
+// 1. MÀN HÌNH ĐĂNG NHẬP HỌC SINH
 function StudentLogin({ students, onLoginSuccess, onBackToTeacher }: { students: Student[]; onLoginSuccess: (s: Student) => void; onBackToTeacher: () => void }) {
   const [code, setCode] = useState('HS001');
   const [error, setError] = useState('');
@@ -193,7 +192,7 @@ function StudentLogin({ students, onLoginSuccess, onBackToTeacher }: { students:
     if (st) {
       onLoginSuccess(st);
     } else {
-      setError('Mã MSHS không có trong danh sách! Thử lại: HS001, HS002, HS003...');
+      setError('Mã MSHS không có trong danh sách! Vui lòng kiểm tra lại.');
     }
   };
 
@@ -204,8 +203,8 @@ function StudentLogin({ students, onLoginSuccess, onBackToTeacher }: { students:
           <div className="bg-indigo-100 w-12 h-12 rounded-full flex items-center justify-center mx-auto text-indigo-600">
             <Users className="w-6 h-6" />
           </div>
-          <h2 className="text-xl font-bold text-slate-800">Cổng Thông Tin Học Sinh (BẢN DEMO)</h2>
-          <p className="text-xs text-slate-500">Thử đăng nhập bằng MSHS mẫu: <strong className="text-indigo-600">HS001</strong>, <strong className="text-indigo-600">HS002</strong> hoặc <strong className="text-indigo-600">HS003</strong></p>
+          <h2 className="text-xl font-bold text-slate-800">Cổng Thông Tin Học Sinh</h2>
+          <p className="text-xs text-slate-500">Nhập mã số học sinh để đăng nhập hệ thống</p>
         </div>
 
         <form onSubmit={handleLogin} className="space-y-4">
@@ -223,7 +222,7 @@ function StudentLogin({ students, onLoginSuccess, onBackToTeacher }: { students:
           {error && <p className="text-xs text-rose-600 bg-rose-50 p-2.5 rounded-lg border border-rose-200">{error}</p>}
 
           <button type="submit" className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-sm shadow-md transition flex items-center justify-center gap-2">
-            <LogIn className="w-4 h-4" /> Đăng Nhập Thử Nghệ
+            <LogIn className="w-4 h-4" /> Đăng Nhập
           </button>
         </form>
 
@@ -237,7 +236,7 @@ function StudentLogin({ students, onLoginSuccess, onBackToTeacher }: { students:
   );
 }
 
-// 2. MÀN HÌNH CÁ NHÂN HỌC SINH (DEMO)
+// 2. MÀN HÌNH CÁ NHÂN HỌC SINH
 function StudentPortal({ student, isSurveyOpen, feeItems, feePayments, violations, commendations, onSaveSurvey, onLogout }: any) {
   const [form, setForm] = useState({ ...student });
 
@@ -258,7 +257,7 @@ function StudentPortal({ student, isSurveyOpen, feeItems, feePayments, violation
 
       {isSurveyOpen && !student.is_survey_submitted && (
         <div className="bg-white rounded-2xl border-2 border-indigo-500 shadow-lg p-6 space-y-4 text-xs">
-          <h2 className="font-bold text-slate-800 text-base border-b pb-2">Phiếu Khảo Sát Thông Tin Học Sinh (Thử Điền)</h2>
+          <h2 className="font-bold text-slate-800 text-base border-b pb-2">Phiếu Khảo Sát Thông Tin Học Sinh</h2>
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="font-semibold block mb-1">Khối thi ĐH:</label>
@@ -270,14 +269,14 @@ function StudentPortal({ student, isSurveyOpen, feeItems, feePayments, violation
             </div>
           </div>
           <button onClick={() => onSaveSurvey({ ...form, is_survey_submitted: true })} className="w-full py-3 bg-indigo-600 text-white font-bold rounded-xl shadow">
-            Lưu & Nộp Phiếu Thử
+            Lưu & Nộp Phiếu
           </button>
         </div>
       )}
 
       <div className="bg-gradient-to-r from-indigo-600 to-purple-600 text-white p-6 rounded-2xl flex justify-between items-center shadow-md">
         <div>
-          <h2 className="text-lg font-bold">Điểm Thi Đua Cá Nhân Sau Cùng</h2>
+          <h2 className="text-lg font-bold">Điểm Thi Đua Cá Nhân</h2>
           <p className="text-xs text-indigo-100">Điểm cơ bản (100) + Cộng ({totalBonus}) - Trừ ({totalPenalty})</p>
         </div>
         <span className="text-3xl font-extrabold">{100 + totalBonus - totalPenalty} ĐIỂM</span>
@@ -286,11 +285,10 @@ function StudentPortal({ student, isSurveyOpen, feeItems, feePayments, violation
   );
 }
 
-// 3. MÀN HÌNH QUẢN LÝ GIÁO VIÊN (DEMO ĐẦY ĐỦ THAO TÁC SỬA/XÓA/THÊM VÀO BỘ NHỚ)
+// 3. MÀN HÌNH QUẢN LÝ GIÁO VIÊN
 function TeacherDashboard({ students, setStudents, isSurveyOpen, setIsSurveyOpen, feeItems, setFeeItems, feePayments, setFeePayments, weeklyViolations, setWeeklyViolations, weeklyCommendations, setWeeklyCommendations }: any) {
   const [activeTab, setActiveTab] = useState<'students' | 'finance' | 'emulation'>('students');
   const [selectedStudentDetail, setSelectedStudentDetail] = useState<Student | null>(null);
-  const [isBuyModalOpen, setIsBuyModalOpen] = useState(false);
 
   // State Form Thêm HS mới
   const [isAddStudentOpen, setIsAddStudentOpen] = useState(false);
@@ -302,13 +300,19 @@ function TeacherDashboard({ students, setStudents, isSurveyOpen, setIsSurveyOpen
   const [newFeeTitle, setNewFeeTitle] = useState('');
   const [newFeeAmount, setNewFeeAmount] = useState('');
 
-  // State Form Vi phạm / Khen thưởng
-  const [selectedWeek, setSelectedWeek] = useState(1);
+  // State Form Vi phạm
   const [vioStudentId, setVioStudentId] = useState('');
   const [vioContent, setVioContent] = useState('');
   const [vioPoints, setVioPenalty] = useState(1);
+  const [vioDate, setVioDate] = useState(new Date().toISOString().split('T')[0]);
 
-  // Thao tác 1: Thêm học sinh thử nghiệm
+  // State Form Khen thưởng
+  const [comStudentId, setComStudentId] = useState('');
+  const [comContent, setComContent] = useState('');
+  const [comPoints, setComBonus] = useState(2);
+  const [comDate, setComDate] = useState(new Date().toISOString().split('T')[0]);
+
+  // Thao tác 1: Thêm học sinh
   const handleAddStudent = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newCode || !newName) return;
@@ -325,12 +329,12 @@ function TeacherDashboard({ students, setStudents, isSurveyOpen, setIsSurveyOpen
     setNewCode('');
     setNewName('');
     setIsAddStudentOpen(false);
-    alert('Đã thêm học sinh mới thành công vào bản Demo!');
+    alert('Đã thêm học sinh mới thành công!');
   };
 
   // Thao tác 2: Xóa học sinh
   const handleDeleteStudent = (id: string, name: string) => {
-    if (confirm(`Xóa thử học sinh ${name}?`)) {
+    if (confirm(`Bạn có chắc chắn muốn xóa học sinh ${name}?`)) {
       setStudents(students.filter((s: any) => s.id !== id));
     }
   };
@@ -372,39 +376,53 @@ function TeacherDashboard({ students, setStudents, isSurveyOpen, setIsSurveyOpen
     const newVio: WeeklyViolation = {
       id: Date.now().toString(),
       student_id: vioStudentId,
-      week_number: selectedWeek,
+      week_number: 1,
       content: vioContent,
       penalty_points: Number(vioPoints),
-      created_date: new Date().toISOString().split('T')[0]
+      created_date: vioDate
     };
     setWeeklyViolations([...weeklyViolations, newVio]);
     setVioContent('');
     alert('Đã thêm ghi nhận vi phạm thành công!');
   };
 
-  // Thao tác 7: Xuất file Excel
+  // Thao tác 7: Ghi nhận khen thưởng
+  const handleAddCommendation = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!comStudentId || !comContent) return;
+    const newCom: WeeklyCommendation = {
+      id: Date.now().toString(),
+      student_id: comStudentId,
+      week_number: 1,
+      content: comContent,
+      bonus_points: Number(comPoints),
+      created_date: comDate
+    };
+    setWeeklyCommendations([...weeklyCommendations, newCom]);
+    setComContent('');
+    alert('Đã thêm khen thưởng thành công!');
+  };
+
+  // Thao tác 8: Xuất file Excel
   const handleExportExcel = () => {
     const dataStudents = students.map((s: any, idx: number) => ({
       'STT': idx + 1, 'MSHS': s.code, 'Họ và Tên': s.full_name, 'Tổ': `Tổ ${s.group_number}`, 'Chức Vụ Lớp': s.class_role, 'SĐT': s.phone
     }));
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(dataStudents), 'Danh Sách Học Sinh');
-    XLSX.writeFile(wb, `Demo_Lop_Chu_Nhiem.xlsx`);
+    XLSX.writeFile(wb, `Danh_Sach_Lop_Chu_Nhiem.xlsx`);
   };
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans">
       <header className="bg-indigo-700 text-white shadow-lg py-4 px-6 flex justify-between items-center flex-wrap gap-3">
         <div>
-          <h1 className="text-xl font-bold">Hệ Thống Quản Lý Lớp Chủ Nhiệm (BẢN DEMO THAO TÁC)</h1>
-          <p className="text-xs text-indigo-200 mt-0.5">Trực tiếp thực hiện các thao tác quản lý • Sĩ Số: {students.length} HS</p>
+          <h1 className="text-xl font-bold">Hệ Thống Quản Lý Lớp Chủ Nhiệm</h1>
+          <p className="text-xs text-indigo-200 mt-0.5">Sĩ Số: {students.length} Học sinh</p>
         </div>
         <div className="flex items-center gap-3">
           <button onClick={handleExportExcel} className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 shadow transition">
-            <FileSpreadsheet className="w-4 h-4" /> Xuất Excel Thử
-          </button>
-          <button onClick={() => setIsBuyModalOpen(true)} className="bg-amber-400 hover:bg-amber-500 text-indigo-950 px-4 py-1.5 rounded-lg text-xs font-extrabold shadow flex items-center gap-1.5 animate-bounce">
-            <Sparkles className="w-4 h-4 text-indigo-900" /> Mua Bản Quyền / Liên Hệ
+            <FileSpreadsheet className="w-4 h-4" /> Xuất File Excel
           </button>
         </div>
       </header>
@@ -426,9 +444,9 @@ function TeacherDashboard({ students, setStudents, isSurveyOpen, setIsSurveyOpen
         {activeTab === 'students' && (
           <div className="space-y-4">
             <div className="flex justify-between items-center gap-4 flex-wrap">
-              <p className="text-xs text-slate-500 italic">* Thầy/Cô có thể bấm thử nút Thêm HS, Sửa chức vụ hoặc Xóa để xem trải nghiệm thực tế.</p>
+              <p className="text-xs text-slate-500">Quản lý danh sách, chức vụ và xem phiếu khảo sát lý lịch học sinh.</p>
               <button onClick={() => setIsAddStudentOpen(true)} className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 shadow">
-                <Plus className="w-4 h-4" /> Thêm HS Mới Thử
+                <Plus className="w-4 h-4" /> Thêm Học Sinh Mới
               </button>
             </div>
 
@@ -440,9 +458,9 @@ function TeacherDashboard({ students, setStudents, isSurveyOpen, setIsSurveyOpen
                     <th className="p-3 border-r">MSHS</th>
                     <th className="p-3 border-r">Họ và Tên</th>
                     <th className="p-3 border-r text-center">Tổ</th>
-                    <th className="p-3 border-r bg-purple-100/70 text-purple-900">Chức Vụ (Chọn Thử)</th>
+                    <th className="p-3 border-r bg-purple-100/70 text-purple-900">Chức Vụ</th>
                     <th className="p-3 border-r text-center">Khảo Sát</th>
-                    <th className="p-3 border-r text-center">Xem Phiếu Chi Tiết</th>
+                    <th className="p-3 border-r text-center">Chi Tiết</th>
                     <th className="p-3 text-center">Thao Tác</th>
                   </tr>
                 </thead>
@@ -467,7 +485,7 @@ function TeacherDashboard({ students, setStudents, isSurveyOpen, setIsSurveyOpen
                       </td>
                       <td className="p-3 border-r text-center">
                         <button onClick={() => setSelectedStudentDetail(s)} className="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 px-2.5 py-1 rounded font-semibold inline-flex items-center gap-1">
-                          <Eye className="w-3.5 h-3.5" /> Xem phiếu mẫu
+                          <Eye className="w-3.5 h-3.5" /> Xem phiếu
                         </button>
                       </td>
                       <td className="p-3 text-center">
@@ -486,7 +504,7 @@ function TeacherDashboard({ students, setStudents, isSurveyOpen, setIsSurveyOpen
           <div className="space-y-6">
             <div className="bg-white p-4 rounded-xl border shadow-sm space-y-3 text-xs">
               <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2">
-                <Plus className="w-4 h-4 text-indigo-600" /> Tạo Khoản Thu Mới Thử Nghiệm
+                <Plus className="w-4 h-4 text-indigo-600" /> Tạo Khoản Thu Mới
               </h3>
               <form onSubmit={handleAddFeeItem} className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
                 <div>
@@ -497,8 +515,8 @@ function TeacherDashboard({ students, setStudents, isSurveyOpen, setIsSurveyOpen
                   <label className="font-semibold block mb-1">Số tiền (VNĐ) (*):</label>
                   <input type="number" placeholder="VD: 50000" value={newFeeAmount} onChange={e => setNewFeeAmount(e.target.value)} className="w-full p-2 border rounded" required />
                 </div>
-                <button type="submit" className="bg-indigo-600 text-white font-bold py-2 px-4 rounded-lg">
-                  + Tạo Khoản Thu Thử
+                <button type="submit" className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-lg">
+                  + Tạo Khoản Thu
                 </button>
               </form>
             </div>
@@ -527,7 +545,7 @@ function TeacherDashboard({ students, setStudents, isSurveyOpen, setIsSurveyOpen
                         return (
                           <td key={item.id} className="p-3 border-r text-center">
                             <button onClick={() => handleTogglePayment(student.id, item.id)} className={`px-3 py-1 rounded font-bold text-[11px] ${isPaid ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}`}>
-                              {isPaid ? '✓ Đã nộp' : '✗ Chưa nộp (Bấm đổi)'}
+                              {isPaid ? '✓ Đã nộp' : '✗ Chưa nộp'}
                             </button>
                           </td>
                         );
@@ -543,40 +561,129 @@ function TeacherDashboard({ students, setStudents, isSurveyOpen, setIsSurveyOpen
         {/* TAB 3: THI ĐỦA */}
         {activeTab === 'emulation' && (
           <div className="space-y-6">
-            <div className="bg-white p-5 rounded-xl border shadow-sm space-y-3 text-xs">
-              <h3 className="font-bold text-rose-700 text-sm flex items-center gap-2 border-b pb-2">
-                <ShieldAlert className="w-4 h-4" /> Thêm Lỗi Vi Phạm Thử Nghiệm
-              </h3>
-              <form onSubmit={handleAddViolation} className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
-                <div>
-                  <label className="font-semibold block mb-1">Chọn Học Sinh:</label>
-                  <select value={vioStudentId} onChange={e => setVioStudentId(e.target.value)} className="w-full p-2 border rounded" required>
-                    <option value="">-- Chọn Học Sinh --</option>
-                    {students.map((s: any) => <option key={s.id} value={s.id}>{s.full_name} ({s.code})</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="font-semibold block mb-1">Nội dung vi phạm:</label>
-                  <input type="text" placeholder="VD: Khai báo sai thông tin" value={vioContent} onChange={e => setVioContent(e.target.value)} className="w-full p-2 border rounded" required />
-                </div>
-                <div>
-                  <label className="font-semibold block mb-1">Điểm trừ:</label>
-                  <input type="number" min="1" value={vioPoints} onChange={e => setVioPenalty(Number(e.target.value))} className="w-full p-2 border rounded" required />
-                </div>
-                <button type="submit" className="bg-rose-600 text-white font-bold py-2 px-4 rounded-lg">
-                  + Thêm Vi Phạm Thử
-                </button>
-              </form>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* KHU VỰC KHEN THƯỞNG & ĐIỂM CỘNG */}
+              <div className="bg-white p-5 rounded-xl border border-emerald-200 shadow-sm space-y-3 text-xs">
+                <h3 className="font-bold text-emerald-700 text-sm flex items-center gap-2 border-b pb-2">
+                  <Award className="w-4 h-4 text-emerald-600" /> Thêm Khen Thưởng / Điểm Cộng
+                </h3>
+                <form onSubmit={handleAddCommendation} className="space-y-3">
+                  <div>
+                    <label className="font-semibold block mb-1">Chọn Học Sinh (*):</label>
+                    <select value={comStudentId} onChange={e => setComStudentId(e.target.value)} className="w-full p-2 border rounded" required>
+                      <option value="">-- Chọn Học Sinh --</option>
+                      {students.map((s: any) => <option key={s.id} value={s.id}>{s.full_name} ({s.code})</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="font-semibold block mb-1">Nội dung khen thưởng (*):</label>
+                    <input type="text" placeholder="VD: Đạt điểm 10 kiểm tra Toán" value={comContent} onChange={e => setComContent(e.target.value)} className="w-full p-2 border rounded" required />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="font-semibold block mb-1">Điểm cộng (+):</label>
+                      <input type="number" min="1" value={comPoints} onChange={e => setComBonus(Number(e.target.value))} className="w-full p-2 border rounded" required />
+                    </div>
+                    <div>
+                      <label className="font-semibold block mb-1">Ngày ghi nhận (*):</label>
+                      <input type="date" value={comDate} onChange={e => setComDate(e.target.value)} className="w-full p-2 border rounded" required />
+                    </div>
+                  </div>
+                  <button type="submit" className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2 px-4 rounded-lg shadow">
+                    + Thêm Điểm Cộng
+                  </button>
+                </form>
+              </div>
+
+              {/* KHU VỰC VI PHẠM & ĐIỂM TRỪ */}
+              <div className="bg-white p-5 rounded-xl border border-rose-200 shadow-sm space-y-3 text-xs">
+                <h3 className="font-bold text-rose-700 text-sm flex items-center gap-2 border-b pb-2">
+                  <ShieldAlert className="w-4 h-4 text-rose-600" /> Thêm Vi Phạm / Điểm Trừ
+                </h3>
+                <form onSubmit={handleAddViolation} className="space-y-3">
+                  <div>
+                    <label className="font-semibold block mb-1">Chọn Học Sinh (*):</label>
+                    <select value={vioStudentId} onChange={e => setVioStudentId(e.target.value)} className="w-full p-2 border rounded" required>
+                      <option value="">-- Chọn Học Sinh --</option>
+                      {students.map((s: any) => <option key={s.id} value={s.id}>{s.full_name} ({s.code})</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="font-semibold block mb-1">Nội dung vi phạm (*):</label>
+                    <input type="text" placeholder="VD: Đi học muộn 10 phút" value={vioContent} onChange={e => setVioContent(e.target.value)} className="w-full p-2 border rounded" required />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="font-semibold block mb-1">Điểm trừ (-):</label>
+                      <input type="number" min="1" value={vioPoints} onChange={e => setVioPenalty(Number(e.target.value))} className="w-full p-2 border rounded" required />
+                    </div>
+                    <div>
+                      <label className="font-semibold block mb-1">Ngày ghi nhận (*):</label>
+                      <input type="date" value={vioDate} onChange={e => setVioDate(e.target.value)} className="w-full p-2 border rounded" required />
+                    </div>
+                  </div>
+                  <button type="submit" className="w-full bg-rose-600 hover:bg-rose-700 text-white font-bold py-2 px-4 rounded-lg shadow">
+                    + Thêm Điểm Trừ
+                  </button>
+                </form>
+              </div>
+            </div>
+
+            {/* BẢNG LỊCH SỬ THI ĐỦA CHI TIẾT */}
+            <div className="bg-white rounded-xl border shadow-sm p-4 space-y-3">
+              <h3 className="font-bold text-slate-800 text-sm">Lịch Sử Khen Thưởng & Vi Phạm Chi Tiết</h3>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs border-collapse whitespace-nowrap">
+                  <thead className="bg-slate-100 font-bold border-b">
+                    <tr>
+                      <th className="p-3 border-r text-center w-12">STT</th>
+                      <th className="p-3 border-r">Ngày Tháng</th>
+                      <th className="p-3 border-r">Học Sinh</th>
+                      <th className="p-3 border-r">Loại Ghi Nhận</th>
+                      <th className="p-3 border-r">Nội Dung Chi Tiết</th>
+                      <th className="p-3 text-center">Điểm Biến Động</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y text-slate-700">
+                    {weeklyCommendations.map((c: any, idx: number) => {
+                      const st = students.find((s: any) => s.id === c.student_id);
+                      return (
+                        <tr key={`com-${c.id}`} className="hover:bg-slate-50">
+                          <td className="p-3 border-r text-center font-bold text-slate-400">{idx + 1}</td>
+                          <td className="p-3 border-r font-semibold">{c.created_date}</td>
+                          <td className="p-3 border-r font-bold text-slate-800">{st ? st.full_name : 'Học sinh'} ({st?.code})</td>
+                          <td className="p-3 border-r"><span className="bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded font-bold">Khen Thưởng</span></td>
+                          <td className="p-3 border-r">{c.content}</td>
+                          <td className="p-3 text-center font-extrabold text-emerald-600">+{c.bonus_points}</td>
+                        </tr>
+                      );
+                    })}
+                    {weeklyViolations.map((v: any, idx: number) => {
+                      const st = students.find((s: any) => s.id === v.student_id);
+                      return (
+                        <tr key={`vio-${v.id}`} className="hover:bg-slate-50">
+                          <td className="p-3 border-r text-center font-bold text-slate-400">{weeklyCommendations.length + idx + 1}</td>
+                          <td className="p-3 border-r font-semibold">{v.created_date}</td>
+                          <td className="p-3 border-r font-bold text-slate-800">{st ? st.full_name : 'Học sinh'} ({st?.code})</td>
+                          <td className="p-3 border-r"><span className="bg-rose-100 text-rose-800 px-2 py-0.5 rounded font-bold">Vi Phạm</span></td>
+                          <td className="p-3 border-r">{v.content}</td>
+                          <td className="p-3 text-center font-extrabold text-rose-600">-{v.penalty_points}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
         )}
       </main>
 
-      {/* MODAL THÊM HS MỚI THỬ */}
+      {/* MODAL THÊM HS MỚI */}
       {isAddStudentOpen && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
           <div className="bg-white max-w-sm w-full rounded-2xl p-6 space-y-4 text-xs">
-            <h3 className="font-bold text-slate-800 text-sm">Thêm Học Sinh Mới Thử Nghiệm</h3>
+            <h3 className="font-bold text-slate-800 text-sm">Thêm Học Sinh Mới</h3>
             <form onSubmit={handleAddStudent} className="space-y-3">
               <div>
                 <label className="font-semibold block mb-1">MSHS (*):</label>
@@ -604,12 +711,12 @@ function TeacherDashboard({ students, setStudents, isSurveyOpen, setIsSurveyOpen
         </div>
       )}
 
-      {/* MODAL XEM PHIẾU MẪU */}
+      {/* MODAL XEM PHIẾU KHẢO SÁT */}
       {selectedStudentDetail && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
           <div className="bg-white max-w-lg w-full rounded-2xl p-6 space-y-3 text-xs">
             <div className="flex justify-between items-center border-b pb-2">
-              <h3 className="font-bold text-slate-800 text-sm">Phiếu Khảo Sát Mẫu: {selectedStudentDetail.full_name} ({selectedStudentDetail.code})</h3>
+              <h3 className="font-bold text-slate-800 text-sm">Phiếu Khảo Sát: {selectedStudentDetail.full_name} ({selectedStudentDetail.code})</h3>
               <button onClick={() => setSelectedStudentDetail(null)} className="text-slate-400">✕</button>
             </div>
             <p><strong>1. Diện chính sách:</strong> {selectedStudentDetail.policy_status}</p>
@@ -617,47 +724,10 @@ function TeacherDashboard({ students, setStudents, isSurveyOpen, setIsSurveyOpen
             <p><strong>3. Mục tiêu danh hiệu:</strong> {selectedStudentDetail.grade_target}</p>
             <p><strong>4. Tiền sử bệnh lý:</strong> {selectedStudentDetail.medical_history}</p>
             <p><strong>5. Năng khiếu:</strong> {selectedStudentDetail.talents}</p>
-            <p><strong>6. Bí mật gửi cô CN:</strong> <span className="italic text-indigo-700">{selectedStudentDetail.secret_message || 'Không có'}</span></p>
+            <p><strong>6. Ghi chú gửi giáo viên:</strong> <span className="italic text-indigo-700">{selectedStudentDetail.secret_message || 'Không có'}</span></p>
             <div className="text-right pt-2 border-t">
               <button onClick={() => setSelectedStudentDetail(null)} className="px-4 py-1.5 bg-indigo-600 text-white rounded font-semibold">Đóng</button>
             </div>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL LIÊN HỆ ĐẶT MUA */}
-      {isBuyModalOpen && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
-          <div className="bg-white max-w-md w-full rounded-2xl p-6 shadow-2xl space-y-4 text-xs">
-            <div className="flex justify-between items-center border-b pb-3">
-              <h3 className="font-bold text-slate-800 text-base flex items-center gap-2">
-                <Sparkles className="w-5 h-5 text-amber-500" /> Đăng Ký Bản Chính Thức
-              </h3>
-              <button onClick={() => setIsBuyModalOpen(false)} className="text-slate-400">✕</button>
-            </div>
-
-            <div className="space-y-3 text-slate-700">
-              <p className="font-semibold text-slate-800 text-sm">Cảm ơn Thầy/Cô đã trải nghiệm phần mềm Quản Lý Lớp Chủ Nhiệm!</p>
-              <div className="bg-amber-50 p-3 rounded-xl border border-amber-200 space-y-2">
-                <p><strong>🎁 Quyền lợi bản chính thức:</strong></p>
-                <ul className="list-disc pl-4 space-y-1">
-                  <li>Tài khoản cá nhân hóa bảo mật 100%.</li>
-                  <li>Lưu trữ CSDL Supabase không giới hạn học sinh & năm học.</li>
-                  <li>Nhận Mã Kích Hoạt API Key riêng chính chủ.</li>
-                  <li>Cập nhật tính năng mới miễn phí.</li>
-                </ul>
-              </div>
-
-              <div className="bg-indigo-50 p-3 rounded-xl border border-indigo-200 space-y-1 text-indigo-900">
-                <p className="font-bold">📞 THÔNG TIN LIÊN HỆ CẤP MÃ API KEY:</p>
-                <p>• Hotline / Zalo Admin: <strong>09xx.xxx.xxx</strong></p>
-                <p>• Email tư vấn: <strong>admin@quanlylop.vn</strong></p>
-              </div>
-            </div>
-
-            <button onClick={() => setIsBuyModalOpen(false)} className="w-full py-2.5 bg-indigo-600 text-white font-bold rounded-xl shadow">
-              Đóng
-            </button>
           </div>
         </div>
       )}

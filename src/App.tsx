@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  Users, Wallet, CheckCircle, XCircle, Plus, Trash2, Edit3, Award, LogOut, LogIn, Lock, Key, ShieldAlert, Eye, Calendar, Trophy, ToggleLeft, ToggleRight
+  Users, Wallet, CheckCircle, XCircle, Plus, Trash2, Edit3, Award, LogOut, LogIn, Lock, Key, ShieldAlert, Eye, Calendar, Trophy, ToggleLeft, ToggleRight, X
 } from 'lucide-react';
 import { supabase } from './supabaseClient';
 
@@ -51,6 +51,7 @@ export interface WeeklyViolation {
   week_number: number;
   content: string;
   penalty_points: number;
+  created_date: string;
 }
 
 export interface WeeklyCommendation {
@@ -59,6 +60,7 @@ export interface WeeklyCommendation {
   week_number: number;
   content: string;
   bonus_points: number;
+  created_date: string;
 }
 
 export interface GroupScore {
@@ -73,23 +75,79 @@ export default function App() {
   const [currentView, setCurrentView] = useState<'teacher' | 'student_login' | 'student_portal'>('teacher');
   const [loggedInStudent, setLoggedInStudent] = useState<Student | null>(null);
   const [teacherPass, setTeacherPass] = useState<string>(() => localStorage.getItem('teacher_password') || '123456');
+  
+  // State điều khiển Modal nhập mật khẩu Giáo viên bảo mật
+  const [isTeacherAuthModalOpen, setIsTeacherAuthModalOpen] = useState(false);
+  const [inputPass, setInputPass] = useState('');
+  const [authError, setAuthError] = useState('');
+
+  const handleTeacherLogin = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (inputPass === teacherPass) {
+      setIsTeacherAuthModalOpen(false);
+      setInputPass('');
+      setAuthError('');
+      setCurrentView('teacher');
+    } else {
+      setAuthError('Mật khẩu Giáo viên không chính xác!');
+    }
+  };
 
   if (currentView === 'student_login') {
     return (
-      <StudentLogin 
-        onLoginSuccess={(student) => {
-          setLoggedInStudent(student);
-          setCurrentView('student_portal');
-        }} 
-        onOpenTeacherAuth={() => {
-          const passInput = prompt('Nhập Mật Khẩu Giáo Viên (Mặc định: 123456):');
-          if (passInput === teacherPass) {
-            setCurrentView('teacher');
-          } else if (passInput !== null) {
-            alert('Mật khẩu Giáo viên không chính xác!');
-          }
-        }}
-      />
+      <>
+        <StudentLogin 
+          onLoginSuccess={(student) => {
+            setLoggedInStudent(student);
+            setCurrentView('student_portal');
+          }} 
+          onOpenTeacherAuth={() => {
+            setInputPass('');
+            setAuthError('');
+            setIsTeacherAuthModalOpen(true);
+          }}
+        />
+
+        {/* MODAL NHẬP MẬT KHẨU GIÁO VIÊN BẢO MẬT (ẨN DẠNG ••••••) */}
+        {isTeacherAuthModalOpen && (
+          <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
+            <div className="bg-white max-w-sm w-full rounded-2xl p-6 shadow-2xl space-y-4">
+              <div className="flex justify-between items-center border-b pb-3">
+                <h3 className="font-bold text-slate-800 text-base flex items-center gap-2">
+                  <Lock className="w-5 h-5 text-indigo-600" /> Xác Nhận Quyền Giáo Viên
+                </h3>
+                <button onClick={() => setIsTeacherAuthModalOpen(false)} className="text-slate-400 hover:text-slate-600">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <form onSubmit={handleTeacherLogin} className="space-y-4 text-xs">
+                <div>
+                  <label className="font-semibold text-slate-600 block mb-1">Mật khẩu Quản Lý (*)</label>
+                  <input
+                    type="password"
+                    required
+                    autoFocus
+                    placeholder="Nhập mật khẩu..."
+                    value={inputPass}
+                    onChange={e => setInputPass(e.target.value)}
+                    className="w-full p-3 border rounded-xl bg-slate-50 text-sm focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                  />
+                </div>
+
+                {authError && <p className="text-rose-600 bg-rose-50 p-2 rounded border border-rose-200">{authError}</p>}
+
+                <div className="flex justify-end gap-2 pt-2">
+                  <button type="button" onClick={() => setIsTeacherAuthModalOpen(false)} className="px-4 py-2 border rounded-xl font-medium">Hủy</button>
+                  <button type="submit" className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold shadow">
+                    Xác Nhận
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+      </>
     );
   }
 
@@ -111,7 +169,6 @@ export default function App() {
       onUpdatePass={(newPass) => {
         setTeacherPass(newPass);
         localStorage.setItem('teacher_password', newPass);
-        alert('Đã cập nhật mật khẩu Giáo viên thành công!');
       }}
       onLogoutTeacher={() => setCurrentView('student_login')} 
     />
@@ -202,7 +259,7 @@ function StudentLogin({ onLoginSuccess, onOpenTeacherAuth }: { onLoginSuccess: (
 // ==========================================
 function StudentPortal({ student, onLogout }: { student: Student; onLogout: () => void }) {
   const [currentStudent, setCurrentStudent] = useState<Student>(student);
-  const [isSurveyOpen, setIsSurveyOpen] = useState<boolean>(true); // Điều khiển từ GV
+  const [isSurveyOpen, setIsSurveyOpen] = useState<boolean>(true);
   const [feeItems, setFeeItems] = useState<FeeItem[]>([]);
   const [feePayments, setFeePayments] = useState<FeePayment[]>([]);
   const [myViolations, setMyViolations] = useState<WeeklyViolation[]>([]);
@@ -233,16 +290,14 @@ function StudentPortal({ student, onLogout }: { student: Student; onLogout: () =
 
   useEffect(() => {
     async function loadData() {
-      // 1. Kiểm tra cấu hình Bật/Tắt Khảo sát từ GV
       const { data: setting } = await supabase.from('system_settings').select('value_boolean').eq('key', 'is_survey_open').single();
       if (setting) setIsSurveyOpen(setting.value_boolean);
 
-      // 2. Lấy dữ liệu khoản thu, vi phạm, khen thưởng
       const [feeRes, payRes, vioRes, comRes] = await Promise.all([
         supabase.from('fee_items').select('*'),
         supabase.from('fee_payments').select('*').eq('student_id', student.id),
-        supabase.from('weekly_violations').select('*').eq('student_id', student.id).order('week_number', { ascending: true }),
-        supabase.from('weekly_commendations').select('*').eq('student_id', student.id).order('week_number', { ascending: true })
+        supabase.from('weekly_violations').select('*').eq('student_id', student.id).order('created_date', { ascending: false }),
+        supabase.from('weekly_commendations').select('*').eq('student_id', student.id).order('created_date', { ascending: false })
       ]);
 
       setFeeItems(feeRes.data || []);
@@ -255,7 +310,7 @@ function StudentPortal({ student, onLogout }: { student: Student; onLogout: () =
 
   const handleSubmitSurvey = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (confirm('Em có chắc chắn các thông tin đã điền là đúng? Sau khi nộp mục khảo sát sẽ ẩn đi.')) {
+    if (confirm('Em có chắc chắn các thông tin đã điền là đúng?')) {
       const updateData = { ...form, is_survey_submitted: true };
       await supabase.from('students').update(updateData).eq('id', currentStudent.id);
       setCurrentStudent({ ...currentStudent, ...updateData });
@@ -266,6 +321,12 @@ function StudentPortal({ student, onLogout }: { student: Student; onLogout: () =
   const totalBonus = myCommendations.reduce((sum, item) => sum + (Number(item.bonus_points) || 0), 0);
   const totalPenalty = myViolations.reduce((sum, item) => sum + (Number(item.penalty_points) || 0), 0);
   const finalScore = 100 + totalBonus - totalPenalty;
+
+  const formatDate = (dateStr: string) => {
+    if (!dateStr) return '';
+    const [y, m, d] = dateStr.split('-');
+    return `${d}/${m}/${y}`;
+  };
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans">
@@ -280,17 +341,12 @@ function StudentPortal({ student, onLogout }: { student: Student; onLogout: () =
       </header>
 
       <main className="flex-1 p-4 md:p-6 max-w-4xl mx-auto w-full space-y-6">
-        {/* ==================================================== */}
-        {/* PHẦN PHIẾU KHẢO SÁT THÔNG TIN (TỰ ĐỘNG ẨN KHI ĐÃ NỘP HOẶC GV TẮT) */}
-        {/* ==================================================== */}
+        {/* PHẦN PHIẾU KHẢO SÁT THÔNG TIN */}
         {isSurveyOpen && !currentStudent.is_survey_submitted && (
           <div className="bg-white rounded-2xl border-2 border-indigo-500 shadow-lg p-6 space-y-6">
-            <div className="border-b pb-3 flex justify-between items-center flex-wrap gap-2">
-              <div>
-                <span className="bg-rose-100 text-rose-700 text-[10px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider">Yêu cầu hoàn thành</span>
-                <h2 className="font-bold text-slate-800 text-lg mt-1">Phiếu Khảo Sát Thông Tin Học Sinh Đầu Năm</h2>
-                <p className="text-xs text-slate-500">Vui lòng điền đầy đủ thông tin bên dưới. Phiếu sẽ tự động ẩn sau khi em bấm Lưu.</p>
-              </div>
+            <div className="border-b pb-3">
+              <span className="bg-rose-100 text-rose-700 text-[10px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider">Yêu cầu hoàn thành</span>
+              <h2 className="font-bold text-slate-800 text-lg mt-1">Phiếu Khảo Sát Thông Tin Học Sinh Đầu Năm</h2>
             </div>
 
             <form onSubmit={handleSubmitSurvey} className="space-y-6 text-xs">
@@ -320,93 +376,13 @@ function StudentPortal({ student, onLogout }: { student: Student; onLogout: () =
                 <h4 className="font-bold text-indigo-600 uppercase">2 & 3. Định hướng & Mục tiêu</h4>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <div>
-                    <label className="font-semibold text-slate-700 block mb-1">2. Khối thi dự định (A00, D01...):</label>
+                    <label className="font-semibold text-slate-700 block mb-1">Khối thi dự định:</label>
                     <input type="text" placeholder="VD: D01" value={form.exam_block} onChange={e => setForm({ ...form, exam_block: e.target.value })} className="w-full p-2.5 border rounded-lg bg-slate-50" />
                   </div>
                   <div>
-                    <label className="font-semibold text-slate-700 block mb-1">3. Mục tiêu danh hiệu:</label>
+                    <label className="font-semibold text-slate-700 block mb-1">Mục tiêu danh hiệu:</label>
                     <input type="text" placeholder="VD: Học sinh Giỏi" value={form.grade_target} onChange={e => setForm({ ...form, grade_target: e.target.value })} className="w-full p-2.5 border rounded-lg bg-slate-50" />
                   </div>
-                </div>
-              </div>
-
-              <div className="space-y-3">
-                <h4 className="font-bold text-indigo-600 uppercase">4 & 5. Sức khỏe & Năng khiếu</h4>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <div>
-                    <label className="font-semibold text-slate-700 block mb-1">4. Bệnh lý cần lưu ý:</label>
-                    <input type="text" placeholder="VD: Cận thị..." value={form.medical_history} onChange={e => setForm({ ...form, medical_history: e.target.value })} className="w-full p-2.5 border rounded-lg bg-slate-50" />
-                  </div>
-                  <div>
-                    <label className="font-semibold text-slate-700 block mb-1">5. Năng khiếu:</label>
-                    <input type="text" placeholder="VD: Hát, vẽ, đá bóng..." value={form.talents} onChange={e => setForm({ ...form, talents: e.target.value })} className="w-full p-2.5 border rounded-lg bg-slate-50" />
-                  </div>
-                </div>
-              </div>
-
-              <div className="space-y-3">
-                <h4 className="font-bold text-indigo-600 uppercase">6. Cán sự & Nguyện vọng</h4>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <div>
-                    <label className="font-semibold text-slate-700 block mb-1">Chức vụ cấp 2 từng làm:</label>
-                    <input type="text" placeholder="VD: Lớp trưởng..." value={form.past_roles} onChange={e => setForm({ ...form, past_roles: e.target.value })} className="w-full p-2.5 border rounded-lg bg-slate-50" />
-                  </div>
-                  <div>
-                    <label className="font-semibold text-slate-700 block mb-1">Muốn ứng cử lớp 10:</label>
-                    <input type="text" placeholder="VD: Lớp phó..." value={form.apply_role} onChange={e => setForm({ ...form, apply_role: e.target.value })} className="w-full p-2.5 border rounded-lg bg-slate-50" />
-                  </div>
-                </div>
-              </div>
-
-              <div className="space-y-3">
-                <h4 className="font-bold text-indigo-600 uppercase">7 & 8. Tính cách & Sở thích</h4>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                  <div>
-                    <label className="font-semibold text-slate-700 block mb-1">7. Tính cách:</label>
-                    <input type="text" placeholder="VD: Hòa đồng..." value={form.personality} onChange={e => setForm({ ...form, personality: e.target.value })} className="w-full p-2.5 border rounded-lg bg-slate-50" />
-                  </div>
-                  <div>
-                    <label className="font-semibold text-slate-700 block mb-1">8. Sở thích rảnh rỗi:</label>
-                    <input type="text" placeholder="VD: Đọc sách..." value={form.hobbies} onChange={e => setForm({ ...form, hobbies: e.target.value })} className="w-full p-2.5 border rounded-lg bg-slate-50" />
-                  </div>
-                  <div>
-                    <label className="font-semibold text-slate-700 block mb-1">SĐT cá nhân:</label>
-                    <input type="text" placeholder="0912..." value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} className="w-full p-2.5 border rounded-lg bg-slate-50" />
-                  </div>
-                </div>
-              </div>
-
-              <div className="space-y-3 pt-2 border-t">
-                <h4 className="font-bold text-indigo-600 uppercase">9. Mong muốn với GVCN</h4>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <div>
-                    <label className="font-semibold text-slate-700 block mb-1">Mong muốn về cô CN:</label>
-                    <input type="text" placeholder="VD: Vui tính..." value={form.teacher_expectation} onChange={e => setForm({ ...form, teacher_expectation: e.target.value })} className="w-full p-2.5 border rounded-lg bg-slate-50" />
-                  </div>
-                  <div>
-                    <label className="font-semibold text-slate-700 block mb-1">Mong muốn hỗ trợ:</label>
-                    <input type="text" placeholder="VD: Học tập..." value={form.teacher_support} onChange={e => setForm({ ...form, teacher_support: e.target.value })} className="w-full p-2.5 border rounded-lg bg-slate-50" />
-                  </div>
-                </div>
-              </div>
-
-              <div className="bg-indigo-50/70 p-4 rounded-xl border border-indigo-200 space-y-2">
-                <h4 className="font-bold text-indigo-900 uppercase">10. Thông điệp bí mật gửi Cô chủ nhiệm</h4>
-                <textarea rows={2} placeholder="Nhập bí mật chỉ Cô biết..." value={form.secret_message} onChange={e => setForm({ ...form, secret_message: e.target.value })} className="w-full p-2.5 border rounded-lg bg-white text-xs" />
-              </div>
-
-              <div className="pt-2 border-t grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="p-3 bg-slate-50 rounded-lg space-y-2">
-                  <p className="font-semibold text-slate-700">Thông tin Bố:</p>
-                  <input type="text" placeholder="Họ tên Bố" value={form.father_name} onChange={e => setForm({ ...form, father_name: e.target.value })} className="w-full p-2 border rounded bg-white" />
-                  <input type="text" placeholder="Nghề nghiệp" value={form.father_job} onChange={e => setForm({ ...form, father_job: e.target.value })} className="w-full p-2 border rounded bg-white" />
-                  <input type="text" placeholder="SĐT Bố" value={form.father_phone} onChange={e => setForm({ ...form, father_phone: e.target.value })} className="w-full p-2 border rounded bg-white" />
-                </div>
-                <div className="p-3 bg-slate-50 rounded-lg space-y-2">
-                  <p className="font-semibold text-slate-700">Thông tin Mẹ:</p>
-                  <input type="text" placeholder="Họ tên Mẹ" value={form.mother_name} onChange={e => setForm({ ...form, mother_name: e.target.value })} className="w-full p-2 border rounded bg-white" />
-                  <input type="text" placeholder="Nghề nghiệp" value={form.mother_job} onChange={e => setForm({ ...form, mother_job: e.target.value })} className="w-full p-2 border rounded bg-white" />
-                  <input type="text" placeholder="SĐT Mẹ" value={form.mother_phone} onChange={e => setForm({ ...form, mother_phone: e.target.value })} className="w-full p-2 border rounded bg-white" />
                 </div>
               </div>
 
@@ -430,7 +406,7 @@ function StudentPortal({ student, onLogout }: { student: Student; onLogout: () =
           </div>
         </div>
 
-        {/* BẢNG VI PHẠM VÀ KHEN THƯỞNG */}
+        {/* BẢNG VI PHẠM VÀ KHEN THƯỞNG BỔ SUNG NGÀY THÁNG */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div className="bg-white rounded-2xl border shadow-sm p-5 space-y-3">
             <div className="flex justify-between items-center border-b pb-2 text-amber-600">
@@ -449,8 +425,11 @@ function StudentPortal({ student, onLogout }: { student: Student; onLogout: () =
                 {myCommendations.map(item => (
                   <div key={item.id} className="py-2.5 flex justify-between items-center text-xs">
                     <div>
-                      <span className="font-bold text-indigo-600 mr-1.5">[Tuần {item.week_number}]</span>
-                      <span className="text-slate-800">{item.content}</span>
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-indigo-600">[Tuần {item.week_number}]</span>
+                        {item.created_date && <span className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-semibold">{formatDate(item.created_date)}</span>}
+                      </div>
+                      <p className="text-slate-800 mt-0.5">{item.content}</p>
                     </div>
                     <span className="font-bold text-amber-600 bg-amber-50 px-2 py-0.5 rounded">
                       +{item.bonus_points}
@@ -478,8 +457,11 @@ function StudentPortal({ student, onLogout }: { student: Student; onLogout: () =
                 {myViolations.map(item => (
                   <div key={item.id} className="py-2.5 flex justify-between items-center text-xs">
                     <div>
-                      <span className="font-bold text-indigo-600 mr-1.5">[Tuần {item.week_number}]</span>
-                      <span className="text-slate-800">{item.content}</span>
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-indigo-600">[Tuần {item.week_number}]</span>
+                        {item.created_date && <span className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-semibold">{formatDate(item.created_date)}</span>}
+                      </div>
+                      <p className="text-slate-800 mt-0.5">{item.content}</p>
                     </div>
                     <span className="font-bold text-rose-600 bg-rose-50 px-2 py-0.5 rounded">
                       -{item.penalty_points}
@@ -536,7 +518,7 @@ function StudentPortal({ student, onLogout }: { student: Student; onLogout: () =
 function TeacherDashboard({ teacherPass, onUpdatePass, onLogoutTeacher }: { teacherPass: string; onUpdatePass: (p: string) => void; onLogoutTeacher: () => void }) {
   const [activeTab, setActiveTab] = useState<'students' | 'finance' | 'emulation'>('students');
   const [students, setStudents] = useState<Student[]>([]);
-  const [isSurveyOpen, setIsSurveyOpen] = useState<boolean>(true); // Trạng thái công tắc khảo sát toàn lớp
+  const [isSurveyOpen, setIsSurveyOpen] = useState<boolean>(true);
   const [feeItems, setFeeItems] = useState<FeeItem[]>([]);
   const [feePayments, setFeePayments] = useState<FeePayment[]>([]);
   const [weeklyViolations, setWeeklyViolations] = useState<WeeklyViolation[]>([]);
@@ -547,18 +529,28 @@ function TeacherDashboard({ teacherPass, onUpdatePass, onLogoutTeacher }: { teac
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
 
+  // Modal Đổi Mật Khẩu Giáo Viên Bảo Mật
+  const [isChangePassModalOpen, setIsChangePassModalOpen] = useState(false);
+  const [oldPassInput, setOldPassInput] = useState('');
+  const [newPassInput, setNewPassInput] = useState('');
+  const [changePassError, setChangePassError] = useState('');
+
   // State Form Tạo Khoản Thu Mới
   const [newFeeTitle, setNewFeeTitle] = useState('');
   const [newFeeAmount, setNewFeeAmount] = useState('');
   const [newFeePaidAll, setNewFeePaidAll] = useState(false);
 
-  // State Form Vi Phạm & Khen Thưởng
+  // State Form Vi Phạm & Khen Thưởng CÓ NGÀY THÁNG CỤ THỂ
+  const todayStr = new Date().toISOString().split('T')[0];
   const [violationStudentId, setViolationStudentId] = useState('');
   const [violationContent, setViolationContent] = useState('');
   const [violationPenalty, setViolationPenalty] = useState(1);
+  const [violationDate, setViolationDate] = useState(todayStr);
+
   const [commendationStudentId, setCommendationStudentId] = useState('');
   const [commendationContent, setCommendationContent] = useState('');
   const [commendationBonus, setCommendationBonus] = useState(1);
+  const [commendationDate, setCommendationDate] = useState(todayStr);
 
   // Modal Sửa / Thêm HS
   const [selectedStudentDetail, setSelectedStudentDetail] = useState<Student | null>(null);
@@ -598,7 +590,24 @@ function TeacherDashboard({ teacherPass, onUpdatePass, onLogoutTeacher }: { teac
 
   useEffect(() => { fetchData(); }, []);
 
-  // ĐIỀU KHIỂN BẬT / TẮT MỤC KHẢO SÁT TOÀN LỚP
+  const handleChangePass = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (oldPassInput !== teacherPass) {
+      setChangePassError('Mật khẩu hiện tại không đúng!');
+      return;
+    }
+    if (!newPassInput.trim()) {
+      setChangePassError('Mật khẩu mới không được để trống!');
+      return;
+    }
+    onUpdatePass(newPassInput);
+    setIsChangePassModalOpen(false);
+    setOldPassInput('');
+    setNewPassInput('');
+    setChangePassError('');
+    alert('Đã đổi mật khẩu Giáo viên thành công!');
+  };
+
   const handleToggleGlobalSurvey = async () => {
     const nextState = !isSurveyOpen;
     await supabase.from('system_settings').upsert({ key: 'is_survey_open', value_boolean: nextState });
@@ -606,9 +615,8 @@ function TeacherDashboard({ teacherPass, onUpdatePass, onLogoutTeacher }: { teac
     alert(nextState ? 'Đã MỞ mục khảo sát cho học sinh!' : 'Đã ĐÓNG (ẨN) mục khảo sát toàn lớp!');
   };
 
-  // MỞ LẠI QUYỀN NỘP PHIẾU CHO 1 HỌC SINH CỤ THỂ
   const handleResetIndividualSurvey = async (studentId: string, name: string) => {
-    if (confirm(`Bạn có muốn mở lại quyền điền phiếu cho học sinh ${name}?`)) {
+    if (confirm(`Mở lại quyền điền phiếu khảo sát cho ${name}?`)) {
       await supabase.from('students').update({ is_survey_submitted: false }).eq('id', studentId);
       fetchData();
     }
@@ -653,6 +661,7 @@ function TeacherDashboard({ teacherPass, onUpdatePass, onLogoutTeacher }: { teac
     }
   };
 
+  // THÊM VI PHẠM CÓ NGÀY THÁNG
   const handleAddViolation = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!violationStudentId || !violationContent) return;
@@ -661,7 +670,8 @@ function TeacherDashboard({ teacherPass, onUpdatePass, onLogoutTeacher }: { teac
       student_id: violationStudentId,
       week_number: selectedWeek,
       content: violationContent,
-      penalty_points: Number(violationPenalty)
+      penalty_points: Number(violationPenalty),
+      created_date: violationDate
     }]);
 
     setViolationContent('');
@@ -674,6 +684,7 @@ function TeacherDashboard({ teacherPass, onUpdatePass, onLogoutTeacher }: { teac
     fetchData();
   };
 
+  // THÊM KHEN THƯỞNG CÓ NGÀY THÁNG
   const handleAddCommendation = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!commendationStudentId || !commendationContent) return;
@@ -682,7 +693,8 @@ function TeacherDashboard({ teacherPass, onUpdatePass, onLogoutTeacher }: { teac
       student_id: commendationStudentId,
       week_number: selectedWeek,
       content: commendationContent,
-      bonus_points: Number(commendationBonus)
+      bonus_points: Number(commendationBonus),
+      created_date: commendationDate
     }]);
 
     setCommendationContent('');
@@ -737,6 +749,12 @@ function TeacherDashboard({ teacherPass, onUpdatePass, onLogoutTeacher }: { teac
     s.code.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
+  const formatDate = (dateStr: string) => {
+    if (!dateStr) return '';
+    const [y, m, d] = dateStr.split('-');
+    return `${d}/${m}/${y}`;
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans">
       <header className="bg-indigo-700 text-white shadow-lg py-4 px-6 flex justify-between items-center flex-wrap gap-3">
@@ -745,7 +763,6 @@ function TeacherDashboard({ teacherPass, onUpdatePass, onLogoutTeacher }: { teac
           <p className="text-xs text-indigo-200 mt-0.5">Trang Quản Lý Giáo Viên • Sĩ Số: {students.length} HS</p>
         </div>
         <div className="flex items-center gap-3">
-          {/* CÔNG TẮC ĐIỀU KHIỂN HIỆN/ẨN MỤC KHẢO SÁT */}
           <button 
             onClick={handleToggleGlobalSurvey}
             className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 shadow transition ${
@@ -753,10 +770,10 @@ function TeacherDashboard({ teacherPass, onUpdatePass, onLogoutTeacher }: { teac
             }`}
           >
             {isSurveyOpen ? <ToggleRight className="w-4 h-4" /> : <ToggleLeft className="w-4 h-4" />}
-            {isSurveyOpen ? 'Mục Khảo Sát: ĐANG BẬT' : 'Mục Khảo Sát: ĐÃ ĐÓNG'}
+            {isSurveyOpen ? 'Khảo Sát: BẬT' : 'Khảo Sát: ĐÓNG'}
           </button>
 
-          <button onClick={() => { const p = prompt('Mật khẩu mới:', teacherPass); if(p) onUpdatePass(p); }} className="bg-indigo-600 hover:bg-indigo-800 text-white px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1">
+          <button onClick={() => { setOldPassInput(''); setNewPassInput(''); setChangePassError(''); setIsChangePassModalOpen(true); }} className="bg-indigo-600 hover:bg-indigo-800 text-white px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1">
             <Key className="w-3.5 h-3.5" /> Đổi Mật Khẩu
           </button>
           <button onClick={onLogoutTeacher} className="bg-rose-600 hover:bg-rose-700 text-white px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1">
@@ -805,7 +822,7 @@ function TeacherDashboard({ teacherPass, onUpdatePass, onLogoutTeacher }: { teac
                         <th className="p-3 border-r">MSHS</th>
                         <th className="p-3 border-r">Họ và Tên</th>
                         <th className="p-3 border-r text-center">Tổ</th>
-                        <th className="p-3 border-r text-center">Trạng Thái Khảo Sát</th>
+                        <th className="p-3 border-r text-center">Khảo Sát</th>
                         <th className="p-3 border-r text-center">Xem Phiếu</th>
                         <th className="p-3 border-r bg-amber-100/70 text-amber-900">Diện Chính Sách</th>
                         <th className="p-3 border-r">Khối Thi</th>
@@ -958,6 +975,7 @@ function TeacherDashboard({ teacherPass, onUpdatePass, onLogoutTeacher }: { teac
               </div>
             )}
 
+            {/* TAB THI ĐỦA BỔ SUNG Ô CHỌN NGÀY THÁNG */}
             {activeTab === 'emulation' && (
               <div className="space-y-6">
                 <div className="bg-white p-4 rounded-xl border shadow-sm flex justify-between items-center flex-wrap gap-3">
@@ -976,14 +994,15 @@ function TeacherDashboard({ teacherPass, onUpdatePass, onLogoutTeacher }: { teac
                   </div>
                 </div>
 
+                {/* FORM VI PHẠM CÓ Ô CHỌN NGÀY */}
                 <div className="bg-white rounded-xl border p-5 shadow-sm space-y-4">
                   <h3 className="font-bold text-rose-700 text-sm flex items-center gap-2 border-b pb-2">
                     <ShieldAlert className="w-4 h-4" /> Ghi Nhận Vi Phạm Tuần {selectedWeek}
                   </h3>
 
-                  <form onSubmit={handleAddViolation} className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end text-xs">
+                  <form onSubmit={handleAddViolation} className="grid grid-cols-1 md:grid-cols-5 gap-3 items-end text-xs">
                     <div>
-                      <label className="font-semibold text-slate-600 block mb-1">Học sinh vi phạm (*)</label>
+                      <label className="font-semibold text-slate-600 block mb-1">Học sinh (*)</label>
                       <select
                         value={violationStudentId}
                         onChange={e => setViolationStudentId(e.target.value)}
@@ -993,6 +1012,16 @@ function TeacherDashboard({ teacherPass, onUpdatePass, onLogoutTeacher }: { teac
                         <option value="">-- Chọn Học Sinh --</option>
                         {students.map(s => <option key={s.id} value={s.id}>{s.full_name} ({s.code})</option>)}
                       </select>
+                    </div>
+                    <div>
+                      <label className="font-semibold text-slate-600 block mb-1">Ngày vi phạm (*)</label>
+                      <input
+                        type="date"
+                        value={violationDate}
+                        onChange={e => setViolationDate(e.target.value)}
+                        className="w-full p-2 border rounded bg-slate-50"
+                        required
+                      />
                     </div>
                     <div>
                       <label className="font-semibold text-slate-600 block mb-1">Nội dung vi phạm (*)</label>
@@ -1031,6 +1060,7 @@ function TeacherDashboard({ teacherPass, onUpdatePass, onLogoutTeacher }: { teac
                           <div key={v.id} className="py-2.5 flex justify-between items-center text-xs">
                             <div>
                               <span className="font-bold text-slate-800">{st?.full_name}</span> ({st?.code}) - <span className="text-rose-600 font-medium">{v.content}</span>
+                              {v.created_date && <span className="ml-2 text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">Ngày: {formatDate(v.created_date)}</span>}
                             </div>
                             <div className="flex items-center gap-3">
                               <span className="bg-rose-100 text-rose-700 px-2 py-0.5 rounded font-bold">-{v.penalty_points} điểm</span>
@@ -1043,14 +1073,15 @@ function TeacherDashboard({ teacherPass, onUpdatePass, onLogoutTeacher }: { teac
                   </div>
                 </div>
 
+                {/* FORM KHEN THƯỞNG CÓ Ô CHỌN NGÀY */}
                 <div className="bg-white rounded-xl border p-5 shadow-sm space-y-4">
                   <h3 className="font-bold text-amber-700 text-sm flex items-center gap-2 border-b pb-2">
                     <Award className="w-4 h-4" /> Tuyên Dương & Khen Thưởng Tuần {selectedWeek}
                   </h3>
 
-                  <form onSubmit={handleAddCommendation} className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end text-xs">
+                  <form onSubmit={handleAddCommendation} className="grid grid-cols-1 md:grid-cols-5 gap-3 items-end text-xs">
                     <div>
-                      <label className="font-semibold text-slate-600 block mb-1">Học sinh khen thưởng (*)</label>
+                      <label className="font-semibold text-slate-600 block mb-1">Học sinh (*)</label>
                       <select
                         value={commendationStudentId}
                         onChange={e => setCommendationStudentId(e.target.value)}
@@ -1060,6 +1091,16 @@ function TeacherDashboard({ teacherPass, onUpdatePass, onLogoutTeacher }: { teac
                         <option value="">-- Chọn Học Sinh --</option>
                         {students.map(s => <option key={s.id} value={s.id}>{s.full_name} ({s.code})</option>)}
                       </select>
+                    </div>
+                    <div>
+                      <label className="font-semibold text-slate-600 block mb-1">Ngày khen thưởng (*)</label>
+                      <input
+                        type="date"
+                        value={commendationDate}
+                        onChange={e => setCommendationDate(e.target.value)}
+                        className="w-full p-2 border rounded bg-slate-50"
+                        required
+                      />
                     </div>
                     <div>
                       <label className="font-semibold text-slate-600 block mb-1">Nội dung tuyên dương (*)</label>
@@ -1098,6 +1139,7 @@ function TeacherDashboard({ teacherPass, onUpdatePass, onLogoutTeacher }: { teac
                           <div key={c.id} className="py-2.5 flex justify-between items-center text-xs">
                             <div>
                               <span className="font-bold text-slate-800">{st?.full_name}</span> ({st?.code}) - <span className="text-amber-700 font-medium">{c.content}</span>
+                              {c.created_date && <span className="ml-2 text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">Ngày: {formatDate(c.created_date)}</span>}
                             </div>
                             <div className="flex items-center gap-3">
                               <span className="bg-amber-100 text-amber-800 px-2 py-0.5 rounded font-bold">+{c.bonus_points} điểm</span>
@@ -1110,6 +1152,7 @@ function TeacherDashboard({ teacherPass, onUpdatePass, onLogoutTeacher }: { teac
                   </div>
                 </div>
 
+                {/* BẢNG ĐIỂM THEO TỔ */}
                 <div className="bg-white rounded-xl border p-5 shadow-sm space-y-4">
                   <h3 className="font-bold text-indigo-700 text-sm flex items-center gap-2 border-b pb-2">
                     <Trophy className="w-4 h-4" /> Bảng Điểm Thi Đua Theo Tổ - Tuần {selectedWeek}
@@ -1139,7 +1182,7 @@ function TeacherDashboard({ teacherPass, onUpdatePass, onLogoutTeacher }: { teac
                               />
                             </div>
                             <div>
-                              <label className="text-slate-600 font-medium">Ghi chú xếp hạng / nhận xét:</label>
+                              <label className="text-slate-600 font-medium">Ghi chú nhận xét:</label>
                               <input
                                 type="text"
                                 placeholder="VD: Hạng 1 toàn lớp"
@@ -1159,6 +1202,52 @@ function TeacherDashboard({ teacherPass, onUpdatePass, onLogoutTeacher }: { teac
           </>
         )}
       </main>
+
+      {/* MODAL ĐỔI MẬT KHẨU BẢO MẬT */}
+      {isChangePassModalOpen && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
+          <div className="bg-white max-w-sm w-full rounded-2xl p-6 shadow-2xl space-y-4">
+            <div className="flex justify-between items-center border-b pb-3">
+              <h3 className="font-bold text-slate-800 text-base flex items-center gap-2">
+                <Key className="w-5 h-5 text-indigo-600" /> Đổi Mật Khẩu Giáo Viên
+              </h3>
+              <button onClick={() => setIsChangePassModalOpen(false)} className="text-slate-400">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleChangePass} className="space-y-3 text-xs">
+              <div>
+                <label className="font-semibold text-slate-600 block mb-1">Mật khẩu hiện tại (*)</label>
+                <input
+                  type="password"
+                  required
+                  value={oldPassInput}
+                  onChange={e => setOldPassInput(e.target.value)}
+                  className="w-full p-2.5 border rounded-lg bg-slate-50 focus:bg-white"
+                />
+              </div>
+              <div>
+                <label className="font-semibold text-slate-600 block mb-1">Mật khẩu mới (*)</label>
+                <input
+                  type="password"
+                  required
+                  value={newPassInput}
+                  onChange={e => setNewPassInput(e.target.value)}
+                  className="w-full p-2.5 border rounded-lg bg-slate-50 focus:bg-white"
+                />
+              </div>
+
+              {changePassError && <p className="text-rose-600 bg-rose-50 p-2 rounded border border-rose-200">{changePassError}</p>}
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button type="button" onClick={() => setIsChangePassModalOpen(false)} className="px-4 py-2 border rounded-lg">Hủy</button>
+                <button type="submit" className="px-4 py-2 bg-indigo-600 text-white rounded-lg font-bold shadow">Lưu Mật Khẩu</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* MODAL CHI TIẾT PHIẾU HỌC SINH */}
       {selectedStudentDetail && (

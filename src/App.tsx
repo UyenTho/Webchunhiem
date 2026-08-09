@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  Users, Wallet, CheckCircle, XCircle, Plus, Trash2, Edit3, Award, LogOut, LogIn, Lock, Key, ShieldAlert, Eye, Calendar, Trophy, ToggleLeft, ToggleRight, X
+  Users, Wallet, CheckCircle, XCircle, Plus, Trash2, Edit3, Award, LogOut, LogIn, Lock, Key, ShieldAlert, Eye, Calendar, Trophy, ToggleLeft, ToggleRight, X, FileSpreadsheet, ShieldCheck
 } from 'lucide-react';
+import * as XLSX from 'xlsx';
 import { supabase } from './supabaseClient';
 
 export interface Student {
@@ -10,6 +11,7 @@ export interface Student {
   full_name: string;
   phone: string;
   group_number: number;
+  class_role: string; // Chức vụ Ban cán sự lớp
   hobbies: string;
   father_name: string;
   father_job: string;
@@ -71,12 +73,24 @@ export interface GroupScore {
   note: string;
 }
 
+const CLASS_ROLES = [
+  'Thành viên',
+  'Lớp trưởng',
+  'Lớp phó',
+  'Bí thư',
+  'Tổ trưởng Tổ 1',
+  'Tổ trưởng Tổ 2',
+  'Tổ trưởng Tổ 3',
+  'Tổ trưởng Tổ 4',
+  'Thư ký',
+  'Thủ quỹ'
+];
+
 export default function App() {
   const [currentView, setCurrentView] = useState<'teacher' | 'student_login' | 'student_portal'>('teacher');
   const [loggedInStudent, setLoggedInStudent] = useState<Student | null>(null);
   const [teacherPass, setTeacherPass] = useState<string>(() => localStorage.getItem('teacher_password') || '123456');
   
-  // State điều khiển Modal nhập mật khẩu Giáo viên bảo mật
   const [isTeacherAuthModalOpen, setIsTeacherAuthModalOpen] = useState(false);
   const [inputPass, setInputPass] = useState('');
   const [authError, setAuthError] = useState('');
@@ -108,7 +122,6 @@ export default function App() {
           }}
         />
 
-        {/* MODAL NHẬP MẬT KHẨU GIÁO VIÊN BẢO MẬT (ẨN DẠNG ••••••) */}
         {isTeacherAuthModalOpen && (
           <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
             <div className="bg-white max-w-sm w-full rounded-2xl p-6 shadow-2xl space-y-4">
@@ -255,7 +268,7 @@ function StudentLogin({ onLoginSuccess, onOpenTeacherAuth }: { onLoginSuccess: (
 }
 
 // ==========================================
-// 2. MÀN HÌNH CÁ NHÂN CỦA HỌC SINH
+// 2. MÀN HÌNH CÁ NHÂN HỌC SINH
 // ==========================================
 function StudentPortal({ student, onLogout }: { student: Student; onLogout: () => void }) {
   const [currentStudent, setCurrentStudent] = useState<Student>(student);
@@ -332,7 +345,14 @@ function StudentPortal({ student, onLogout }: { student: Student; onLogout: () =
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans">
       <header className="bg-indigo-700 text-white py-4 px-6 flex justify-between items-center shadow-md">
         <div>
-          <span className="text-xs bg-indigo-600 px-2.5 py-1 rounded font-semibold">{currentStudent.code}</span>
+          <div className="flex items-center gap-2">
+            <span className="text-xs bg-indigo-600 px-2.5 py-1 rounded font-semibold">{currentStudent.code}</span>
+            {currentStudent.class_role && currentStudent.class_role !== 'Thành viên' && (
+              <span className="text-xs bg-purple-500 text-white px-2 py-0.5 rounded-full font-bold flex items-center gap-1">
+                <ShieldCheck className="w-3 h-3" /> {currentStudent.class_role}
+              </span>
+            )}
+          </div>
           <h1 className="text-lg font-bold mt-1">{currentStudent.full_name} (Tổ {currentStudent.group_number || 1})</h1>
         </div>
         <button onClick={onLogout} className="bg-indigo-600 hover:bg-indigo-800 text-white px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5">
@@ -341,7 +361,6 @@ function StudentPortal({ student, onLogout }: { student: Student; onLogout: () =
       </header>
 
       <main className="flex-1 p-4 md:p-6 max-w-4xl mx-auto w-full space-y-6">
-        {/* PHẦN PHIẾU KHẢO SÁT THÔNG TIN */}
         {isSurveyOpen && !currentStudent.is_survey_submitted && (
           <div className="bg-white rounded-2xl border-2 border-indigo-500 shadow-lg p-6 space-y-6">
             <div className="border-b pb-3">
@@ -393,7 +412,6 @@ function StudentPortal({ student, onLogout }: { student: Student; onLogout: () =
           </div>
         )}
 
-        {/* TỔNG KẾT ĐIỂM THI ĐỦA SAU CÙNG */}
         <div className="bg-gradient-to-r from-indigo-600 to-purple-600 text-white p-6 rounded-2xl shadow-md flex justify-between items-center flex-wrap gap-4">
           <div>
             <span className="text-xs bg-white/20 px-3 py-1 rounded-full font-bold uppercase tracking-wider">Tổng Kết Thi Đua</span>
@@ -406,7 +424,6 @@ function StudentPortal({ student, onLogout }: { student: Student; onLogout: () =
           </div>
         </div>
 
-        {/* BẢNG VI PHẠM VÀ KHEN THƯỞNG BỔ SUNG NGÀY THÁNG */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div className="bg-white rounded-2xl border shadow-sm p-5 space-y-3">
             <div className="flex justify-between items-center border-b pb-2 text-amber-600">
@@ -473,7 +490,6 @@ function StudentPortal({ student, onLogout }: { student: Student; onLogout: () =
           </div>
         </div>
 
-        {/* KHOẢN THU */}
         <div className="bg-white rounded-2xl border shadow-sm p-6 space-y-4">
           <div className="flex items-center gap-2 text-indigo-600 border-b pb-3">
             <Wallet className="w-5 h-5" />
@@ -529,18 +545,15 @@ function TeacherDashboard({ teacherPass, onUpdatePass, onLogoutTeacher }: { teac
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Modal Đổi Mật Khẩu Giáo Viên Bảo Mật
   const [isChangePassModalOpen, setIsChangePassModalOpen] = useState(false);
   const [oldPassInput, setOldPassInput] = useState('');
   const [newPassInput, setNewPassInput] = useState('');
   const [changePassError, setChangePassError] = useState('');
 
-  // State Form Tạo Khoản Thu Mới
   const [newFeeTitle, setNewFeeTitle] = useState('');
   const [newFeeAmount, setNewFeeAmount] = useState('');
   const [newFeePaidAll, setNewFeePaidAll] = useState(false);
 
-  // State Form Vi Phạm & Khen Thưởng CÓ NGÀY THÁNG CỤ THỂ
   const todayStr = new Date().toISOString().split('T')[0];
   const [violationStudentId, setViolationStudentId] = useState('');
   const [violationContent, setViolationContent] = useState('');
@@ -552,12 +565,11 @@ function TeacherDashboard({ teacherPass, onUpdatePass, onLogoutTeacher }: { teac
   const [commendationBonus, setCommendationBonus] = useState(1);
   const [commendationDate, setCommendationDate] = useState(todayStr);
 
-  // Modal Sửa / Thêm HS
   const [selectedStudentDetail, setSelectedStudentDetail] = useState<Student | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
   const [formData, setFormData] = useState({
-    code: '', full_name: '', phone: '', group_number: 1, hobbies: '', policy_status: 'Không', policy_note: '',
+    code: '', full_name: '', phone: '', group_number: 1, class_role: 'Thành viên', hobbies: '', policy_status: 'Không', policy_note: '',
     father_name: '', father_job: '', father_phone: '', mother_name: '', mother_job: '', mother_phone: ''
   });
 
@@ -589,6 +601,95 @@ function TeacherDashboard({ teacherPass, onUpdatePass, onLogoutTeacher }: { teac
   };
 
   useEffect(() => { fetchData(); }, []);
+
+  // XUẤT FILE EXCEL TỔNG HỢP TOÀN BỘ DỮ LIỆU CỦA LỚP
+  const handleExportExcel = () => {
+    // Sheet 1: Lý lịch học sinh
+    const dataStudents = students.map((s, idx) => ({
+      'STT': idx + 1,
+      'Mã Số HS': s.code,
+      'Họ và Tên': s.full_name,
+      'Tổ': `Tổ ${s.group_number || 1}`,
+      'Chức Vụ Lớp': s.class_role || 'Thành viên',
+      'SĐT Học Sinh': s.phone || '',
+      'Diện Chính Sách': s.policy_status || 'Không',
+      'Ghi Chú Chính Sách': s.policy_note || '',
+      'Khối Thi ĐH': s.exam_block || '',
+      'Mục Tiêu Danh Hiệu': s.grade_target || '',
+      'Họ Tên Bố': s.father_name || '',
+      'SĐT Bố': s.father_phone || '',
+      'Họ Tên Mẹ': s.mother_name || '',
+      'SĐT Mẹ': s.mother_phone || ''
+    }));
+
+    // Sheet 2: Khảo sát chi tiết
+    const dataSurveys = students.map((s, idx) => ({
+      'STT': idx + 1,
+      'Mã Số HS': s.code,
+      'Họ và Tên': s.full_name,
+      'Trạng Thái Nộp': s.is_survey_submitted ? 'Đã nộp' : 'Chưa nộp',
+      'Tiền Sử Bệnh Lý': s.medical_history || '',
+      'Năng Khiếu': s.talents || '',
+      'Chức Vụ Cấp 2': s.past_roles || '',
+      'Ứng Cử Lớp 10': s.apply_role || '',
+      'Tính Cách': s.personality || '',
+      'Sở Thích': s.hobbies || '',
+      'Mong Muốn Với GVCN': s.teacher_expectation || '',
+      'Mong Muốn Hỗ Trợ': s.teacher_support || '',
+      'Thông Điệp Bí Mật': s.secret_message || ''
+    }));
+
+    // Sheet 3: Bảng thu chi
+    const dataFinance = students.map((s, idx) => {
+      const row: any = {
+        'STT': idx + 1,
+        'Mã Số HS': s.code,
+        'Họ và Tên': s.full_name,
+      };
+      feeItems.forEach(item => {
+        const pay = feePayments.find(p => p.student_id === s.id && p.fee_item_id === item.id);
+        row[`${item.title} (${item.amount.toLocaleString()}đ)`] = pay?.is_paid ? 'Đã nộp' : 'Chưa nộp';
+      });
+      return row;
+    });
+
+    // Sheet 4: Điểm thi đua & vi phạm tổng hợp
+    const dataEmulation = students.map((s, idx) => {
+      const stVio = weeklyViolations.filter(v => v.student_id === s.id);
+      const stCom = weeklyCommendations.filter(c => c.student_id === s.id);
+
+      const totalBonus = stCom.reduce((sum, i) => sum + (Number(i.bonus_points) || 0), 0);
+      const totalPenalty = stVio.reduce((sum, i) => sum + (Number(i.penalty_points) || 0), 0);
+
+      const vioDetail = stVio.map(v => `[Tuần ${v.week_number} - ${v.created_date || ''}]: ${v.content} (-${v.penalty_points}đ)`).join(' | ');
+      const comDetail = stCom.map(c => `[Tuần ${c.week_number} - ${c.created_date || ''}]: ${c.content} (+${c.bonus_points}đ)`).join(' | ');
+
+      return {
+        'STT': idx + 1,
+        'Mã Số HS': s.code,
+        'Họ và Tên': s.full_name,
+        'Điểm Gốc': 100,
+        'Tổng Điểm Cộng': totalBonus,
+        'Tổng Điểm Trừ': totalPenalty,
+        'Điểm Thi Đua Cuối Cùng': 100 + totalBonus - totalPenalty,
+        'Chi Tiết Vi Phạm': vioDetail || 'Không vi phạm',
+        'Chi Tiết Khen Thưởng': comDetail || 'Chưa có'
+      };
+    });
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(dataStudents), '1. Danh Sách & Lý Lịch');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(dataSurveys), '2. Khảo Sát Chi Tiết');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(dataFinance), '3. Tổng Hợp Thu Chi');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(dataEmulation), '4. Thi Đua & Vi Phạm');
+
+    XLSX.writeFile(wb, `Bao_Cao_Tong_Hop_Lop_Chu_Nhiem_${new Date().toISOString().split('T')[0]}.xlsx`);
+  };
+
+  const handleUpdateStudentRole = async (studentId: string, newRole: string) => {
+    await supabase.from('students').update({ class_role: newRole }).eq('id', studentId);
+    setStudents(students.map(s => s.id === studentId ? { ...s, class_role: newRole } : s));
+  };
 
   const handleChangePass = (e: React.FormEvent) => {
     e.preventDefault();
@@ -661,7 +762,6 @@ function TeacherDashboard({ teacherPass, onUpdatePass, onLogoutTeacher }: { teac
     }
   };
 
-  // THÊM VI PHẠM CÓ NGÀY THÁNG
   const handleAddViolation = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!violationStudentId || !violationContent) return;
@@ -684,7 +784,6 @@ function TeacherDashboard({ teacherPass, onUpdatePass, onLogoutTeacher }: { teac
     fetchData();
   };
 
-  // THÊM KHEN THƯỞNG CÓ NGÀY THÁNG
   const handleAddCommendation = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!commendationStudentId || !commendationContent) return;
@@ -719,14 +818,14 @@ function TeacherDashboard({ teacherPass, onUpdatePass, onLogoutTeacher }: { teac
 
   const handleOpenAddModal = () => {
     setEditingStudent(null);
-    setFormData({ code: '', full_name: '', phone: '', group_number: 1, hobbies: '', policy_status: 'Không', policy_note: '', father_name: '', father_job: '', father_phone: '', mother_name: '', mother_job: '', mother_phone: '' });
+    setFormData({ code: '', full_name: '', phone: '', group_number: 1, class_role: 'Thành viên', hobbies: '', policy_status: 'Không', policy_note: '', father_name: '', father_job: '', father_phone: '', mother_name: '', mother_job: '', mother_phone: '' });
     setIsModalOpen(true);
   };
 
   const handleOpenEditModal = (s: Student) => {
     setEditingStudent(s);
     setFormData({
-      code: s.code, full_name: s.full_name, phone: s.phone || '', group_number: s.group_number || 1, hobbies: s.hobbies || '', policy_status: s.policy_status || 'Không', policy_note: s.policy_note || '',
+      code: s.code, full_name: s.full_name, phone: s.phone || '', group_number: s.group_number || 1, class_role: s.class_role || 'Thành viên', hobbies: s.hobbies || '', policy_status: s.policy_status || 'Không', policy_note: s.policy_note || '',
       father_name: s.father_name || '', father_job: s.father_job || '', father_phone: s.father_phone || '',
       mother_name: s.mother_name || '', mother_job: s.mother_job || '', mother_phone: s.mother_phone || ''
     });
@@ -763,10 +862,18 @@ function TeacherDashboard({ teacherPass, onUpdatePass, onLogoutTeacher }: { teac
           <p className="text-xs text-indigo-200 mt-0.5">Trang Quản Lý Giáo Viên • Sĩ Số: {students.length} HS</p>
         </div>
         <div className="flex items-center gap-3">
+          {/* NÚT XUẤT EXCEL TỔNG HỢP */}
+          <button 
+            onClick={handleExportExcel}
+            className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 shadow transition"
+          >
+            <FileSpreadsheet className="w-4 h-4" /> Xuất Báo Cáo Excel
+          </button>
+
           <button 
             onClick={handleToggleGlobalSurvey}
             className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 shadow transition ${
-              isSurveyOpen ? 'bg-emerald-500 hover:bg-emerald-600 text-white' : 'bg-slate-600 hover:bg-slate-700 text-slate-200'
+              isSurveyOpen ? 'bg-indigo-500 hover:bg-indigo-600 text-white' : 'bg-slate-600 hover:bg-slate-700 text-slate-200'
             }`}
           >
             {isSurveyOpen ? <ToggleRight className="w-4 h-4" /> : <ToggleLeft className="w-4 h-4" />}
@@ -822,6 +929,7 @@ function TeacherDashboard({ teacherPass, onUpdatePass, onLogoutTeacher }: { teac
                         <th className="p-3 border-r">MSHS</th>
                         <th className="p-3 border-r">Họ và Tên</th>
                         <th className="p-3 border-r text-center">Tổ</th>
+                        <th className="p-3 border-r bg-purple-100/70 text-purple-900">Ban Cán Sự Lớp</th>
                         <th className="p-3 border-r text-center">Khảo Sát</th>
                         <th className="p-3 border-r text-center">Xem Phiếu</th>
                         <th className="p-3 border-r bg-amber-100/70 text-amber-900">Diện Chính Sách</th>
@@ -838,6 +946,20 @@ function TeacherDashboard({ teacherPass, onUpdatePass, onLogoutTeacher }: { teac
                           <td className="p-3 border-r font-bold text-indigo-600">{s.code}</td>
                           <td className="p-3 border-r font-bold text-slate-800">{s.full_name}</td>
                           <td className="p-3 border-r text-center font-bold text-amber-700">Tổ {s.group_number || 1}</td>
+                          
+                          {/* CỘT CẤP QUYỀN BAN CÁN SỰ LỚP */}
+                          <td className="p-3 border-r bg-purple-50/40">
+                            <select
+                              value={s.class_role || 'Thành viên'}
+                              onChange={e => handleUpdateStudentRole(s.id, e.target.value)}
+                              className="p-1.5 border rounded-lg bg-white font-semibold text-purple-800 text-xs focus:ring-2 focus:ring-purple-500"
+                            >
+                              {CLASS_ROLES.map(role => (
+                                <option key={role} value={role}>{role}</option>
+                              ))}
+                            </select>
+                          </td>
+
                           <td className="p-3 border-r text-center">
                             {s.is_survey_submitted ? (
                               <span className="bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded font-bold text-[10px]">Đã nộp</span>
@@ -975,7 +1097,6 @@ function TeacherDashboard({ teacherPass, onUpdatePass, onLogoutTeacher }: { teac
               </div>
             )}
 
-            {/* TAB THI ĐỦA BỔ SUNG Ô CHỌN NGÀY THÁNG */}
             {activeTab === 'emulation' && (
               <div className="space-y-6">
                 <div className="bg-white p-4 rounded-xl border shadow-sm flex justify-between items-center flex-wrap gap-3">
@@ -994,7 +1115,6 @@ function TeacherDashboard({ teacherPass, onUpdatePass, onLogoutTeacher }: { teac
                   </div>
                 </div>
 
-                {/* FORM VI PHẠM CÓ Ô CHỌN NGÀY */}
                 <div className="bg-white rounded-xl border p-5 shadow-sm space-y-4">
                   <h3 className="font-bold text-rose-700 text-sm flex items-center gap-2 border-b pb-2">
                     <ShieldAlert className="w-4 h-4" /> Ghi Nhận Vi Phạm Tuần {selectedWeek}
@@ -1073,7 +1193,6 @@ function TeacherDashboard({ teacherPass, onUpdatePass, onLogoutTeacher }: { teac
                   </div>
                 </div>
 
-                {/* FORM KHEN THƯỞNG CÓ Ô CHỌN NGÀY */}
                 <div className="bg-white rounded-xl border p-5 shadow-sm space-y-4">
                   <h3 className="font-bold text-amber-700 text-sm flex items-center gap-2 border-b pb-2">
                     <Award className="w-4 h-4" /> Tuyên Dương & Khen Thưởng Tuần {selectedWeek}
@@ -1152,7 +1271,6 @@ function TeacherDashboard({ teacherPass, onUpdatePass, onLogoutTeacher }: { teac
                   </div>
                 </div>
 
-                {/* BẢNG ĐIỂM THEO TỔ */}
                 <div className="bg-white rounded-xl border p-5 shadow-sm space-y-4">
                   <h3 className="font-bold text-indigo-700 text-sm flex items-center gap-2 border-b pb-2">
                     <Trophy className="w-4 h-4" /> Bảng Điểm Thi Đua Theo Tổ - Tuần {selectedWeek}
@@ -1203,7 +1321,7 @@ function TeacherDashboard({ teacherPass, onUpdatePass, onLogoutTeacher }: { teac
         )}
       </main>
 
-      {/* MODAL ĐỔI MẬT KHẨU BẢO MẬT */}
+      {/* MODAL ĐỔI MẬT KHẨU */}
       {isChangePassModalOpen && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
           <div className="bg-white max-w-sm w-full rounded-2xl p-6 shadow-2xl space-y-4">
@@ -1255,7 +1373,12 @@ function TeacherDashboard({ teacherPass, onUpdatePass, onLogoutTeacher }: { teac
           <div className="bg-white rounded-2xl max-w-2xl w-full p-6 space-y-4 my-8 shadow-2xl">
             <div className="flex justify-between items-center border-b pb-3">
               <div>
-                <span className="text-xs bg-indigo-100 text-indigo-700 px-2.5 py-0.5 rounded font-bold">{selectedStudentDetail.code}</span>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs bg-indigo-100 text-indigo-700 px-2.5 py-0.5 rounded font-bold">{selectedStudentDetail.code}</span>
+                  {selectedStudentDetail.class_role && (
+                    <span className="text-xs bg-purple-100 text-purple-800 px-2 py-0.5 rounded font-bold">{selectedStudentDetail.class_role}</span>
+                  )}
+                </div>
                 <h3 className="font-bold text-slate-800 text-lg mt-1">Phiếu Khảo Sát: {selectedStudentDetail.full_name}</h3>
               </div>
               <button onClick={() => setSelectedStudentDetail(null)} className="text-slate-400">✕</button>
@@ -1310,6 +1433,14 @@ function TeacherDashboard({ teacherPass, onUpdatePass, onLogoutTeacher }: { teac
                   <option value={2}>Tổ 2</option>
                   <option value={3}>Tổ 3</option>
                   <option value={4}>Tổ 4</option>
+                </select>
+              </div>
+              <div>
+                <label className="font-semibold text-slate-600">Chức Vụ Ban Cán Sự (*)</label>
+                <select value={formData.class_role} onChange={e => setFormData({ ...formData, class_role: e.target.value })} className="w-full p-2 border rounded mt-1 font-medium text-purple-800">
+                  {CLASS_ROLES.map(r => (
+                    <option key={r} value={r}>{r}</option>
+                  ))}
                 </select>
               </div>
               <div className="flex justify-end gap-2 pt-3">

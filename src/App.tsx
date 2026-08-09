@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  Users, Wallet, CheckCircle, XCircle, Plus, Trash2, Edit3, Award, LogOut, LogIn, Lock, Key, ShieldAlert, Eye, Calendar, Trophy, ToggleLeft, ToggleRight, X, FileSpreadsheet, ShieldCheck, UserPlus, Mail
+  Users, Wallet, CheckCircle, XCircle, Plus, Trash2, Edit3, Award, LogOut, LogIn, Lock, Key, ShieldAlert, Eye, Calendar, Trophy, ToggleLeft, ToggleRight, X, FileSpreadsheet, ShieldCheck, HelpCircle
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { supabase } from './supabaseClient';
@@ -91,33 +91,33 @@ export default function App() {
   const [loggedInStudent, setLoggedInStudent] = useState<Student | null>(null);
   const [teacherUser, setTeacherUser] = useState<any>(null);
 
-  // Điều khiển Modal Đăng nhập / Đăng ký Giáo viên
+  // Modal Đăng nhập / Đăng ký / Quên mật khẩu
   const [isTeacherAuthModalOpen, setIsTeacherAuthModalOpen] = useState(false);
-  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
+  const [authMode, setAuthMode] = useState<'login' | 'register' | 'forgot_password'>('login');
 
-  // Form Đăng nhập Giáo viên
+  // State Form Đăng nhập
   const [teacherEmail, setTeacherEmail] = useState('');
   const [teacherPassword, setTeacherPassword] = useState('');
   
-  // Form Đăng ký Giáo viên
+  // State Form Đăng ký
   const [regFullName, setRegFullName] = useState('');
   const [regEmail, setRegEmail] = useState('');
   const [regPassword, setRegPassword] = useState('');
   const [regKeyCode, setRegKeyCode] = useState('');
 
+  // State Quên Mật Khẩu
+  const [forgotEmail, setForgotEmail] = useState('');
+  const [forgotSuccessMsg, setForgotSuccessMsg] = useState('');
+
   const [authError, setAuthError] = useState('');
   const [authLoading, setAuthLoading] = useState(false);
 
   useEffect(() => {
-    // Kiểm tra phiên đăng nhập hiện tại của Giáo viên
     supabase.auth.getUser().then(({ data: { user } }) => {
-      if (user) {
-        setTeacherUser(user);
-      }
+      if (user) setTeacherUser(user);
     });
   }, []);
 
-  // HÀM XỬ LÝ ĐĂNG NHẬP GIÁO VIÊN
   const handleTeacherLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthLoading(true);
@@ -135,7 +135,6 @@ export default function App() {
         return;
       }
 
-      // Kiểm tra Hạn Sử Dụng
       const { data: subData } = await supabase
         .from('teacher_subscriptions')
         .select('*')
@@ -170,14 +169,12 @@ export default function App() {
     }
   };
 
-  // HÀM XỬ LÝ ĐĂNG KÝ BẰNG MÃ KÍCH HOẠT (API KEY)
   const handleTeacherRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthLoading(true);
     setAuthError('');
 
     try {
-      // 1. Kiểm tra Mã Key trong Database
       const { data: keyData, error: keyError } = await supabase
         .from('license_keys')
         .select('*')
@@ -191,7 +188,6 @@ export default function App() {
         return;
       }
 
-      // 2. Tạo tài khoản Giáo viên trên Supabase Auth
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email: regEmail.trim(),
         password: regPassword,
@@ -203,12 +199,10 @@ export default function App() {
         return;
       }
 
-      // 3. Tính ngày hết hạn dựa trên Key (mặc định 365 ngày)
       const expireDateObj = new Date();
       expireDateObj.setDate(expireDateObj.getDate() + (keyData.duration_days || 365));
       const expireDateStr = expireDateObj.toISOString().split('T')[0];
 
-      // 4. Lưu thông tin Hạn sử dụng
       await supabase.from('teacher_subscriptions').insert([{
         teacher_id: authData.user.id,
         email: regEmail.trim(),
@@ -217,7 +211,6 @@ export default function App() {
         is_active: true
       }]);
 
-      // 5. Đánh dấu Mã Key đã được dùng
       await supabase
         .from('license_keys')
         .update({ is_used: true, used_by_email: regEmail.trim() })
@@ -234,6 +227,31 @@ export default function App() {
     }
   };
 
+  // HÀM XỬ LÝ GỬI YÊU CẦU QUÊN MẬT KHẨU
+  const handleForgotPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!forgotEmail.trim()) return;
+    setAuthLoading(true);
+    setAuthError('');
+    setForgotSuccessMsg('');
+
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(forgotEmail.trim(), {
+        redirectTo: window.location.origin,
+      });
+
+      if (error) {
+        setAuthError('Không thể gửi yêu cầu. Vui lòng kiểm tra lại email!');
+      } else {
+        setForgotSuccessMsg('Đã gửi liên kết khôi phục mật khẩu tới email của bạn. Vui lòng kiểm tra hộp thư!');
+      }
+    } catch {
+      setAuthError('Lỗi kết nối máy chủ!');
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
   if (currentView === 'student_login') {
     return (
       <>
@@ -244,26 +262,29 @@ export default function App() {
           }} 
           onOpenTeacherAuth={() => {
             setAuthError('');
+            setForgotSuccessMsg('');
             setIsTeacherAuthModalOpen(true);
           }}
         />
 
-        {/* MODAL ĐĂNG NHẬP / ĐĂNG KÝ TÀI KHOẢN GIÁO VIÊN */}
+        {/* MODAL XÁC THỰC GIÁO VIÊN (ĐĂNG NHẬP / ĐĂNG KÝ / QUÊN MẬT KHẨU) */}
         {isTeacherAuthModalOpen && (
           <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
             <div className="bg-white max-w-md w-full rounded-2xl p-6 shadow-2xl space-y-4">
               <div className="flex justify-between items-center border-b pb-3">
                 <h3 className="font-bold text-slate-800 text-base flex items-center gap-2">
                   <Lock className="w-5 h-5 text-indigo-600" /> 
-                  {authMode === 'login' ? 'Đăng Nhập Giáo Viên' : 'Đăng Ký Tài Khoản Bằng API Key'}
+                  {authMode === 'login' && 'Đăng Nhập Giáo Viên'}
+                  {authMode === 'register' && 'Đăng Ký Bằng API Key'}
+                  {authMode === 'forgot_password' && 'Khôi Phục Mật Khẩu'}
                 </h3>
                 <button onClick={() => setIsTeacherAuthModalOpen(false)} className="text-slate-400 hover:text-slate-600">
                   <X className="w-5 h-5" />
                 </button>
               </div>
 
-              {/* TÁC VỤ ĐĂNG NHẬP */}
-              {authMode === 'login' ? (
+              {/* TÁC VỤ 1: ĐĂNG NHẬP */}
+              {authMode === 'login' && (
                 <form onSubmit={handleTeacherLogin} className="space-y-4 text-xs">
                   <div>
                     <label className="font-semibold text-slate-600 block mb-1">Email Giáo Viên (*)</label>
@@ -277,7 +298,16 @@ export default function App() {
                     />
                   </div>
                   <div>
-                    <label className="font-semibold text-slate-600 block mb-1">Mật Khẩu (*)</label>
+                    <div className="flex justify-between items-center mb-1">
+                      <label className="font-semibold text-slate-600">Mật Khẩu (*)</label>
+                      <button
+                        type="button"
+                        onClick={() => { setAuthMode('forgot_password'); setAuthError(''); setForgotSuccessMsg(''); }}
+                        className="text-indigo-600 text-[11px] font-semibold hover:underline"
+                      >
+                        Quên mật khẩu?
+                      </button>
+                    </div>
                     <input
                       type="password"
                       required
@@ -305,8 +335,10 @@ export default function App() {
                     </button>
                   </p>
                 </form>
-              ) : (
-                /* TÁC VỤ ĐĂNG KÝ BẰNG KEY */
+              )}
+
+              {/* TÁC VỤ 2: ĐĂNG KÝ BẰNG KEY */}
+              {authMode === 'register' && (
                 <form onSubmit={handleTeacherRegister} className="space-y-3 text-xs">
                   <div>
                     <label className="font-semibold text-slate-600 block mb-1">Họ và Tên Giáo Viên (*)</label>
@@ -351,7 +383,6 @@ export default function App() {
                       onChange={e => setRegKeyCode(e.target.value)}
                       className="w-full p-2 border rounded-lg bg-white uppercase font-bold text-indigo-700"
                     />
-                    <p className="text-[10px] text-amber-700 italic">* Nhập Mã Kích Hoạt được Admin cung cấp sau khi mua.</p>
                   </div>
 
                   {authError && <p className="text-rose-600 bg-rose-50 p-2.5 rounded-lg border border-rose-200">{authError}</p>}
@@ -366,6 +397,50 @@ export default function App() {
 
                   <p className="text-center text-slate-500 pt-2 border-t">
                     Đã có tài khoản?{' '}
+                    <button type="button" onClick={() => { setAuthMode('login'); setAuthError(''); }} className="text-indigo-600 font-bold hover:underline">
+                      Đăng nhập
+                    </button>
+                  </p>
+                </form>
+              )}
+
+              {/* TÁC VỤ 3: QUÊN MẬT KHẨU */}
+              {authMode === 'forgot_password' && (
+                <form onSubmit={handleForgotPassword} className="space-y-4 text-xs">
+                  <div className="bg-indigo-50 p-3 rounded-xl border border-indigo-200 text-indigo-900 leading-relaxed">
+                    <p className="font-semibold flex items-center gap-1">
+                      <HelpCircle className="w-4 h-4 text-indigo-600" /> Hướng dẫn lấy lại mật khẩu:
+                    </p>
+                    <p className="mt-1 text-[11px] text-slate-600">
+                      Nhập email đã đăng ký của bạn bên dưới. Hệ thống sẽ gửi email tự động đặt lại mật khẩu hoặc bạn có thể liên hệ <strong>Admin (Zalo)</strong> để nhận mật khẩu tạm thời.
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="font-semibold text-slate-600 block mb-1">Email đã đăng ký (*)</label>
+                    <input
+                      type="email"
+                      required
+                      placeholder="giaovien@gmail.com"
+                      value={forgotEmail}
+                      onChange={e => setForgotEmail(e.target.value)}
+                      className="w-full p-2.5 border rounded-xl bg-slate-50 focus:bg-white text-xs"
+                    />
+                  </div>
+
+                  {authError && <p className="text-rose-600 bg-rose-50 p-2.5 rounded-lg border border-rose-200">{authError}</p>}
+                  {forgotSuccessMsg && <p className="text-emerald-700 bg-emerald-50 p-2.5 rounded-lg border border-emerald-200">{forgotSuccessMsg}</p>}
+
+                  <button
+                    type="submit"
+                    disabled={authLoading}
+                    className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold shadow transition"
+                  >
+                    {authLoading ? 'Đang gửi...' : 'Gửi Yêu Cầu Đặt Lại Mật Khẩu'}
+                  </button>
+
+                  <p className="text-center text-slate-500 pt-2 border-t">
+                    Quay lại{' '}
                     <button type="button" onClick={() => { setAuthMode('login'); setAuthError(''); }} className="text-indigo-600 font-bold hover:underline">
                       Đăng nhập
                     </button>
@@ -744,7 +819,7 @@ function StudentPortal({ student, onLogout }: { student: Student; onLogout: () =
 }
 
 // ==========================================
-// 3. MÀN HÌNH QUẢN LÝ GIÁO VIÊN (CÓ ĐẦY ĐỦ TEACHER_ID)
+// 3. MÀN HÌNH QUẢN LÝ GIÁO VIÊN
 // ==========================================
 function TeacherDashboard({ teacherUser, onLogoutTeacher }: { teacherUser: any; onLogoutTeacher: () => void }) {
   const [activeTab, setActiveTab] = useState<'students' | 'finance' | 'emulation'>('students');
@@ -759,6 +834,11 @@ function TeacherDashboard({ teacherUser, onLogoutTeacher }: { teacherUser: any; 
   const [selectedWeek, setSelectedWeek] = useState<number>(1);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
+
+  // Modal Đổi Mật Khẩu Cá Nhân
+  const [isChangePassModalOpen, setIsChangePassModalOpen] = useState(false);
+  const [newPassInput, setNewPassInput] = useState('');
+  const [changePassError, setChangePassError] = useState('');
 
   const [newFeeTitle, setNewFeeTitle] = useState('');
   const [newFeeAmount, setNewFeeAmount] = useState('');
@@ -813,6 +893,24 @@ function TeacherDashboard({ teacherUser, onLogoutTeacher }: { teacherUser: any; 
 
   useEffect(() => { fetchData(); }, [teacherUser]);
 
+  const handleChangeSelfPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newPassInput || newPassInput.length < 6) {
+      setChangePassError('Mật khẩu mới phải từ 6 ký tự trở lên!');
+      return;
+    }
+
+    const { error } = await supabase.auth.updateUser({ password: newPassInput });
+    if (error) {
+      setChangePassError('Không thể cập nhật mật khẩu: ' + error.message);
+    } else {
+      alert('Đã đổi mật khẩu thành công!');
+      setIsChangePassModalOpen(false);
+      setNewPassInput('');
+      setChangePassError('');
+    }
+  };
+
   const handleExportExcel = () => {
     const dataStudents = students.map((s, idx) => ({
       'STT': idx + 1,
@@ -845,80 +943,6 @@ function TeacherDashboard({ teacherUser, onLogoutTeacher }: { teacherUser: any; 
     await supabase.from('system_settings').upsert({ key: 'is_survey_open', value_boolean: nextState });
     setIsSurveyOpen(nextState);
     alert(nextState ? 'Đã MỞ mục khảo sát cho học sinh!' : 'Đã ĐÓNG (ẨN) mục khảo sát toàn lớp!');
-  };
-
-  const handleAddFeeItem = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newFeeTitle || !newFeeAmount || !teacherUser) return;
-
-    const amount = Number(newFeeAmount);
-    const { data: item, error } = await supabase
-      .from('fee_items')
-      .insert([{ title: newFeeTitle, amount, teacher_id: teacherUser.id }])
-      .select().single();
-
-    if (!error && item) {
-      if (newFeePaidAll && students.length > 0) {
-        const payments = students.map(s => ({
-          student_id: s.id,
-          fee_item_id: item.id,
-          is_paid: true,
-          teacher_id: teacherUser.id
-        }));
-        await supabase.from('fee_payments').insert(payments);
-      }
-      setNewFeeTitle('');
-      setNewFeeAmount('');
-      setNewFeePaidAll(false);
-      fetchData();
-    }
-  };
-
-  const handleTogglePayment = async (studentId: string, feeItemId: string, currentPaid: boolean) => {
-    if (!teacherUser) return;
-    await supabase.from('fee_payments').upsert({
-      student_id: studentId,
-      fee_item_id: feeItemId,
-      is_paid: !currentPaid,
-      teacher_id: teacherUser.id
-    });
-    fetchData();
-  };
-
-  const handleAddViolation = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!violationStudentId || !violationContent || !teacherUser) return;
-
-    await supabase.from('weekly_violations').insert([{
-      student_id: violationStudentId,
-      week_number: selectedWeek,
-      content: violationContent,
-      penalty_points: Number(violationPenalty),
-      created_date: violationDate,
-      teacher_id: teacherUser.id
-    }]);
-
-    setViolationContent('');
-    setViolationPenalty(1);
-    fetchData();
-  };
-
-  const handleAddCommendation = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!commendationStudentId || !commendationContent || !teacherUser) return;
-
-    await supabase.from('weekly_commendations').insert([{
-      student_id: commendationStudentId,
-      week_number: selectedWeek,
-      content: commendationContent,
-      bonus_points: Number(commendationBonus),
-      created_date: commendationDate,
-      teacher_id: teacherUser.id
-    }]);
-
-    setCommendationContent('');
-    setCommendationBonus(1);
-    fetchData();
   };
 
   const handleSaveStudent = async (e: React.FormEvent) => {
@@ -966,6 +990,10 @@ function TeacherDashboard({ teacherUser, onLogoutTeacher }: { teacherUser: any; 
           >
             {isSurveyOpen ? <ToggleRight className="w-4 h-4" /> : <ToggleLeft className="w-4 h-4" />}
             {isSurveyOpen ? 'Khảo Sát: BẬT' : 'Khảo Sát: ĐÓNG'}
+          </button>
+
+          <button onClick={() => { setNewPassInput(''); setChangePassError(''); setIsChangePassModalOpen(true); }} className="bg-indigo-600 hover:bg-indigo-800 text-white px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1">
+            <Key className="w-3.5 h-3.5" /> Đổi Mật Khẩu
           </button>
 
           <button onClick={onLogoutTeacher} className="bg-rose-600 hover:bg-rose-700 text-white px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1">
@@ -1067,6 +1095,43 @@ function TeacherDashboard({ teacherUser, onLogoutTeacher }: { teacherUser: any; 
           </>
         )}
       </main>
+
+      {/* MODAL ĐỔI MẬT KHẨU CÁ NHÂN */}
+      {isChangePassModalOpen && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
+          <div className="bg-white max-w-sm w-full rounded-2xl p-6 shadow-2xl space-y-4">
+            <div className="flex justify-between items-center border-b pb-3">
+              <h3 className="font-bold text-slate-800 text-base flex items-center gap-2">
+                <Key className="w-5 h-5 text-indigo-600" /> Đổi Mật Khẩu Cá Nhân
+              </h3>
+              <button onClick={() => setIsChangePassModalOpen(false)} className="text-slate-400">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleChangeSelfPassword} className="space-y-3 text-xs">
+              <div>
+                <label className="font-semibold text-slate-600 block mb-1">Mật khẩu mới (*)</label>
+                <input
+                  type="password"
+                  required
+                  placeholder="Tối thiểu 6 ký tự..."
+                  value={newPassInput}
+                  onChange={e => setNewPassInput(e.target.value)}
+                  className="w-full p-2.5 border rounded-lg bg-slate-50 focus:bg-white"
+                />
+              </div>
+
+              {changePassError && <p className="text-rose-600 bg-rose-50 p-2 rounded border border-rose-200">{changePassError}</p>}
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button type="button" onClick={() => setIsChangePassModalOpen(false)} className="px-4 py-2 border rounded-lg">Hủy</button>
+                <button type="submit" className="px-4 py-2 bg-indigo-600 text-white rounded-lg font-bold shadow">Lưu Mật Khẩu Mới</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* MODAL THÊM HS */}
       {isModalOpen && (

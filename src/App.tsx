@@ -136,7 +136,7 @@ export default function App() {
 
   return (
     <div>
-      {/* THANH DIỀU HƯỚNG & TRẠNG THÁI */}
+      {/* THANH ĐIỀU HƯỚNG TRÊN CÙNG */}
       <div className="bg-gradient-to-r from-indigo-700 via-indigo-600 to-purple-600 text-white text-xs py-2 px-4 font-bold flex justify-between items-center shadow-md flex-wrap gap-2">
         <span className="flex items-center gap-1.5">
           <Sparkles className="w-4 h-4 text-amber-200" /> Quản Lý Lớp Chủ Nhiệm
@@ -215,6 +215,7 @@ export default function App() {
           setWeeklyCommendations={setWeeklyCommendations}
           announcements={announcements}
           setAnnouncements={setAnnouncements}
+          onTeacherLogout={handleLogout}
         />
       )}
     </div>
@@ -286,7 +287,6 @@ function StudentPortal({ student, isSurveyOpen, feeItems, feePayments, violation
 
   return (
     <div className="min-h-screen bg-slate-50 p-4 md:p-6 max-w-5xl mx-auto space-y-6 font-sans">
-      {/* THÔNG TIN HỌC SINH & ĐĂNG XUẤT */}
       <header className="bg-indigo-700 text-white p-4 rounded-2xl flex justify-between items-center shadow-md">
         <div>
           <span className="text-xs bg-indigo-600 border border-indigo-400 px-2.5 py-1 rounded font-bold">{student.code}</span>
@@ -343,7 +343,6 @@ function StudentPortal({ student, isSurveyOpen, feeItems, feePayments, violation
         </h2>
         
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {/* CỘNG ĐIỂM / KHEN THƯỞNG */}
           <div className="border border-emerald-200 rounded-xl p-4 bg-emerald-50/30 space-y-2">
             <h3 className="font-bold text-emerald-800 text-xs flex items-center justify-between">
               <span>🌟 Khen Thưởng (+{totalBonus} điểm)</span>
@@ -366,7 +365,6 @@ function StudentPortal({ student, isSurveyOpen, feeItems, feePayments, violation
             )}
           </div>
 
-          {/* TRỪ ĐIỂM / VI PHẠM */}
           <div className="border border-rose-200 rounded-xl p-4 bg-rose-50/30 space-y-2">
             <h3 className="font-bold text-rose-800 text-xs flex items-center justify-between">
               <span>⚠️ Vi Phạm / Điểm Trừ (-{totalPenalty} điểm)</span>
@@ -457,8 +455,8 @@ function StudentPortal({ student, isSurveyOpen, feeItems, feePayments, violation
   );
 }
 
-// 3. MÀN HÌNH QUẢN LÝ GIÁO VIÊN
-function TeacherDashboard({ students, setStudents, isSurveyOpen, setIsSurveyOpen, feeItems, setFeeItems, feePayments, setFeePayments, weeklyViolations, setWeeklyViolations, weeklyCommendations, setWeeklyCommendations, announcements, setAnnouncements }: any) {
+// 3. MÀN HÌNH QUẢN LÝ GIÁO VIÊN (ĐÃ BỔ SUNG NÚT ĐĂNG XUẤT)
+function TeacherDashboard({ students, setStudents, isSurveyOpen, setIsSurveyOpen, feeItems, setFeeItems, feePayments, setFeePayments, weeklyViolations, setWeeklyViolations, weeklyCommendations, setWeeklyCommendations, announcements, setAnnouncements, onTeacherLogout }: any) {
   const [activeTab, setActiveTab] = useState<'students' | 'finance' | 'emulation' | 'announcements'>('students');
   const [selectedStudentDetail, setSelectedStudentDetail] = useState<Student | null>(null);
 
@@ -490,7 +488,6 @@ function TeacherDashboard({ students, setStudents, isSurveyOpen, setIsSurveyOpen
   const [annContent, setAnnContent] = useState('');
   const [annImportant, setAnnImportant] = useState(false);
 
-  // Thao tác Thêm học sinh
   const handleAddStudent = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newCode || !newName) return;
@@ -520,7 +517,6 @@ function TeacherDashboard({ students, setStudents, isSurveyOpen, setIsSurveyOpen
     setStudents(students.map((s: any) => s.id === id ? { ...s, class_role: role } : s));
   };
 
-  // Tạo khoản thu mới
   const handleAddFeeItem = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newFeeTitle || !newFeeAmount) return;
@@ -546,7 +542,6 @@ function TeacherDashboard({ students, setStudents, isSurveyOpen, setIsSurveyOpen
     }
   };
 
-  // Vi phạm & Khen thưởng
   const handleAddViolation = (e: React.FormEvent) => {
     e.preventDefault();
     if (!vioStudentId || !vioContent) return;
@@ -579,7 +574,6 @@ function TeacherDashboard({ students, setStudents, isSurveyOpen, setIsSurveyOpen
     alert('Đã thêm khen thưởng thành công!');
   };
 
-  // Tạo thông báo mới
   const handleAddAnnouncement = (e: React.FormEvent) => {
     e.preventDefault();
     if (!annTitle || !annContent) return;
@@ -601,7 +595,6 @@ function TeacherDashboard({ students, setStudents, isSurveyOpen, setIsSurveyOpen
     setAnnouncements(announcements.filter((a: Announcement) => a.id !== id));
   };
 
-  // Xuất file Excel
   const handleExportExcel = () => {
     const dataStudents = students.map((s: any, idx: number) => ({
       'STT': idx + 1, 'MSHS': s.code, 'Họ và Tên': s.full_name, 'Tổ': `Tổ ${s.group_number}`, 'Chức Vụ Lớp': s.class_role, 'SĐT': s.phone
@@ -613,14 +606,18 @@ function TeacherDashboard({ students, setStudents, isSurveyOpen, setIsSurveyOpen
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans">
+      {/* HEADER GIÁO VIÊN VỚI NÚT ĐĂNG XUẤT NỔI BẬT */}
       <header className="bg-indigo-700 text-white shadow-lg py-4 px-6 flex justify-between items-center flex-wrap gap-3">
         <div>
-          <h1 className="text-xl font-bold">Hệ Thống Quản Lý Lớp Chủ Nhiệm</h1>
+          <h1 className="text-xl font-bold">Hệ Thống Quản Lý Lớp Chủ Nhiệm (Giáo Viên)</h1>
           <p className="text-xs text-indigo-200 mt-0.5">Sĩ Số: {students.length} Học sinh</p>
         </div>
         <div className="flex items-center gap-3">
           <button onClick={handleExportExcel} className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 shadow transition">
             <FileSpreadsheet className="w-4 h-4" /> Xuất File Excel
+          </button>
+          <button onClick={onTeacherLogout} className="bg-rose-600 hover:bg-rose-700 text-white px-3.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 shadow transition">
+            <LogOut className="w-4 h-4" /> Đăng Xuất Giáo Viên
           </button>
         </div>
       </header>
@@ -821,7 +818,6 @@ function TeacherDashboard({ students, setStudents, isSurveyOpen, setIsSurveyOpen
         {activeTab === 'emulation' && (
           <div className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {/* KHU VỰC KHEN THƯỞNG & ĐIỂM CỘNG */}
               <div className="bg-white p-5 rounded-xl border border-emerald-200 shadow-sm space-y-3 text-xs">
                 <h3 className="font-bold text-emerald-700 text-sm flex items-center gap-2 border-b pb-2">
                   <Award className="w-4 h-4 text-emerald-600" /> Thêm Khen Thưởng / Điểm Cộng
@@ -854,7 +850,6 @@ function TeacherDashboard({ students, setStudents, isSurveyOpen, setIsSurveyOpen
                 </form>
               </div>
 
-              {/* KHU VỰC VI PHẠM & ĐIỂM TRỪ */}
               <div className="bg-white p-5 rounded-xl border border-rose-200 shadow-sm space-y-3 text-xs">
                 <h3 className="font-bold text-rose-700 text-sm flex items-center gap-2 border-b pb-2">
                   <ShieldAlert className="w-4 h-4 text-rose-600" /> Thêm Vi Phạm / Điểm Trừ
@@ -888,7 +883,6 @@ function TeacherDashboard({ students, setStudents, isSurveyOpen, setIsSurveyOpen
               </div>
             </div>
 
-            {/* BẢNG LỊCH SỬ THI ĐỦA CHI TIẾT */}
             <div className="bg-white rounded-xl border shadow-sm p-4 space-y-3">
               <h3 className="font-bold text-slate-800 text-sm">Lịch Sử Khen Thưởng & Vi Phạm Chi Tiết</h3>
               <div className="overflow-x-auto">

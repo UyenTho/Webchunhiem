@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { 
-  Users, Wallet, CheckCircle, XCircle, Plus, Trash2, Edit3, Award, LogOut, LogIn, Lock, Key, ShieldAlert, Eye, Calendar, Trophy, ToggleLeft, ToggleRight, X, FileSpreadsheet, ShieldCheck, FileUp, Sparkles, Send, Check, Gift
+  Users, Wallet, CheckCircle, XCircle, Plus, Trash2, Edit3, Award, LogOut, LogIn, Lock, Key, ShieldAlert, Eye, Calendar, Trophy, ToggleLeft, ToggleRight, X, FileSpreadsheet, ShieldCheck, FileUp, Sparkles, Send, Check, Gift, Bell, Clock, AlertCircle
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
@@ -37,6 +37,7 @@ export interface FeeItem {
   id: string;
   title: string;
   amount: number;
+  deadline: string;
 }
 
 export interface FeePayment {
@@ -61,6 +62,14 @@ export interface WeeklyCommendation {
   content: string;
   bonus_points: number;
   created_date: string;
+}
+
+export interface Announcement {
+  id: string;
+  title: string;
+  content: string;
+  created_date: string;
+  important: boolean;
 }
 
 const CLASS_ROLES = [
@@ -101,8 +110,8 @@ export default function App() {
   
   const [isSurveyOpen, setIsSurveyOpen] = useState(true);
   const [feeItems, setFeeItems] = useState<FeeItem[]>([
-    { id: 'f1', title: 'Quỹ lớp Học kỳ 1', amount: 200000 },
-    { id: 'f2', title: 'Bảo hiểm y tế', amount: 680000 }
+    { id: 'f1', title: 'Quỹ lớp Học kỳ 1', amount: 200000, deadline: '2026-09-30' },
+    { id: 'f2', title: 'Bảo hiểm y tế', amount: 680000, deadline: '2026-10-15' }
   ]);
   const [feePayments, setFeePayments] = useState<FeePayment[]>([
     { student_id: '1', fee_item_id: 'f1', is_paid: true },
@@ -115,21 +124,49 @@ export default function App() {
   const [weeklyCommendations, setWeeklyCommendations] = useState<WeeklyCommendation[]>([
     { id: 'c1', student_id: '1', week_number: 1, content: 'Đạt điểm 10 kiểm tra Toán', bonus_points: 5, created_date: '2026-09-09' }
   ]);
+  const [announcements, setAnnouncements] = useState<Announcement[]>([
+    { id: 'a1', title: 'Nộp lệ phí Bảo hiểm Y tế', content: 'Cả lớp hoàn thành nộp BHYT trước ngày 15/10 cho Thủ quỹ lớp.', created_date: '2026-09-10', important: true },
+    { id: 'a2', title: 'Họp Tổ đầu tuần', content: 'Các Tổ trưởng chuẩn bị bảng chấm điểm thi đua của tổ mình trước giờ Sinh hoạt lớp.', created_date: '2026-09-12', important: false }
+  ]);
+
+  const handleLogout = () => {
+    setLoggedInStudent(null);
+    setCurrentView('student_login');
+  };
 
   return (
     <div>
-      {/* THANH CHUYỂN ĐỔI GIAO DIỆN */}
+      {/* THANH DIỀU HƯỚNG & TRẠNG THÁI */}
       <div className="bg-gradient-to-r from-indigo-700 via-indigo-600 to-purple-600 text-white text-xs py-2 px-4 font-bold flex justify-between items-center shadow-md flex-wrap gap-2">
         <span className="flex items-center gap-1.5">
           <Sparkles className="w-4 h-4 text-amber-200" /> Quản Lý Lớp Chủ Nhiệm
         </span>
         <div className="flex items-center gap-2">
-          <button 
-            onClick={() => setCurrentView(currentView === 'teacher' ? 'student_login' : 'teacher')} 
-            className="bg-white text-indigo-900 px-3 py-1 rounded-full text-[11px] font-extrabold hover:bg-indigo-50 transition shadow"
-          >
-            {currentView === 'teacher' ? '👉 Xem Giao Diện Học Sinh' : '👉 Quay Lại Màn Hình Giáo Viên'}
-          </button>
+          {currentView === 'teacher' ? (
+            <button 
+              onClick={() => setCurrentView('student_login')} 
+              className="bg-white text-indigo-900 px-3 py-1 rounded-full text-[11px] font-extrabold hover:bg-indigo-50 transition shadow flex items-center gap-1"
+            >
+              👉 Chuyển Sang Màn Hình Học Sinh
+            </button>
+          ) : (
+            <div className="flex items-center gap-2">
+              <button 
+                onClick={() => setCurrentView('teacher')} 
+                className="bg-indigo-900 text-white border border-indigo-400 px-3 py-1 rounded-full text-[11px] font-extrabold hover:bg-indigo-800 transition"
+              >
+                👉 Chuyển Sang Màn Hình Giáo Viên
+              </button>
+              {loggedInStudent && (
+                <button 
+                  onClick={handleLogout} 
+                  className="bg-rose-600 hover:bg-rose-700 text-white px-3 py-1 rounded-full text-[11px] font-extrabold transition shadow flex items-center gap-1"
+                >
+                  <LogOut className="w-3.5 h-3.5" /> Đăng Xuất
+                </button>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
@@ -152,12 +189,13 @@ export default function App() {
           feePayments={feePayments}
           violations={weeklyViolations.filter(v => v.student_id === loggedInStudent.id)}
           commendations={weeklyCommendations.filter(c => c.student_id === loggedInStudent.id)}
+          announcements={announcements}
           onSaveSurvey={(updatedStudent) => {
             setStudents(students.map(s => s.id === updatedStudent.id ? updatedStudent : s));
             setLoggedInStudent(updatedStudent);
             alert('Đã nộp phiếu khảo sát thành công!');
           }}
-          onLogout={() => setCurrentView('student_login')}
+          onLogout={handleLogout}
         />
       )}
 
@@ -175,6 +213,8 @@ export default function App() {
           setWeeklyViolations={setWeeklyViolations}
           weeklyCommendations={weeklyCommendations}
           setWeeklyCommendations={setWeeklyCommendations}
+          announcements={announcements}
+          setAnnouncements={setAnnouncements}
         />
       )}
     </div>
@@ -237,24 +277,164 @@ function StudentLogin({ students, onLoginSuccess, onBackToTeacher }: { students:
 }
 
 // 2. MÀN HÌNH CÁ NHÂN HỌC SINH
-function StudentPortal({ student, isSurveyOpen, feeItems, feePayments, violations, commendations, onSaveSurvey, onLogout }: any) {
+function StudentPortal({ student, isSurveyOpen, feeItems, feePayments, violations, commendations, announcements, onSaveSurvey, onLogout }: any) {
   const [form, setForm] = useState({ ...student });
 
   const totalBonus = commendations.reduce((sum: number, i: any) => sum + (Number(i.bonus_points) || 0), 0);
   const totalPenalty = violations.reduce((sum: number, i: any) => sum + (Number(i.penalty_points) || 0), 0);
+  const totalScore = 100 + totalBonus - totalPenalty;
 
   return (
-    <div className="min-h-screen bg-slate-50 p-6 max-w-4xl mx-auto space-y-6 font-sans">
-      <header className="bg-indigo-700 text-white p-4 rounded-xl flex justify-between items-center">
+    <div className="min-h-screen bg-slate-50 p-4 md:p-6 max-w-5xl mx-auto space-y-6 font-sans">
+      {/* THÔNG TIN HỌC SINH & ĐĂNG XUẤT */}
+      <header className="bg-indigo-700 text-white p-4 rounded-2xl flex justify-between items-center shadow-md">
         <div>
-          <span className="text-xs bg-indigo-600 px-2.5 py-1 rounded font-semibold">{student.code}</span>
-          <h1 className="text-lg font-bold mt-1">{student.full_name} (Tổ {student.group_number})</h1>
+          <span className="text-xs bg-indigo-600 border border-indigo-400 px-2.5 py-1 rounded font-bold">{student.code}</span>
+          <h1 className="text-xl font-bold mt-1">{student.full_name} <span className="text-indigo-200 text-sm font-normal">(Tổ {student.group_number} - {student.class_role})</span></h1>
         </div>
-        <button onClick={onLogout} className="bg-indigo-600 hover:bg-indigo-800 text-white px-3 py-1.5 rounded-lg text-xs font-semibold">
-          Thoát Màn Hình HS
+        <button onClick={onLogout} className="bg-rose-600 hover:bg-rose-700 text-white px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition shadow">
+          <LogOut className="w-4 h-4" /> Đăng Xuất
         </button>
       </header>
 
+      {/* THÔNG BÁO TỪ GIÁO VIÊN */}
+      <section className="bg-white rounded-2xl border shadow-sm p-5 space-y-3">
+        <h2 className="font-bold text-slate-800 text-base flex items-center gap-2 border-b pb-2">
+          <Bell className="w-5 h-5 text-indigo-600" /> Thông Báo & Nhiệm Vụ Trong Tuần
+        </h2>
+        {announcements.length === 0 ? (
+          <p className="text-xs text-slate-500 italic">Chưa có thông báo nào trong tuần.</p>
+        ) : (
+          <div className="space-y-3">
+            {announcements.map((a: Announcement) => (
+              <div key={a.id} className={`p-3.5 rounded-xl border text-xs space-y-1 ${a.important ? 'bg-amber-50 border-amber-300' : 'bg-slate-50 border-slate-200'}`}>
+                <div className="flex justify-between items-center">
+                  <span className="font-bold text-slate-800 text-sm flex items-center gap-1.5">
+                    {a.important && <AlertCircle className="w-4 h-4 text-amber-600 inline" />}
+                    {a.title}
+                  </span>
+                  <span className="text-[10px] text-slate-400 font-medium flex items-center gap-1"><Clock className="w-3 h-3" /> {a.created_date}</span>
+                </div>
+                <p className="text-slate-600 leading-relaxed">{a.content}</p>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      {/* TỔNG QUAN ĐIỂM THI ĐỦA CÁ NHÂN */}
+      <div className="bg-gradient-to-r from-indigo-600 to-purple-600 text-white p-6 rounded-2xl flex justify-between items-center shadow-md">
+        <div>
+          <h2 className="text-lg font-bold flex items-center gap-2"><Trophy className="w-5 h-5 text-amber-300" /> Điểm Thi Đua Cá Nhân</h2>
+          <p className="text-xs text-indigo-100 mt-1">
+            Điểm cơ bản (100) + Điểm cộng (+{totalBonus}) - Điểm trừ (-{totalPenalty})
+          </p>
+        </div>
+        <div className="text-right">
+          <span className="text-3xl font-extrabold">{totalScore}</span>
+          <span className="text-xs block text-indigo-200">ĐIỂM</span>
+        </div>
+      </div>
+
+      {/* CHI TIẾT KHEN THƯỞNG & VI PHẠM CỦA BẢN THÂN */}
+      <section className="bg-white rounded-2xl border shadow-sm p-5 space-y-4">
+        <h2 className="font-bold text-slate-800 text-base flex items-center gap-2 border-b pb-2">
+          <Award className="w-5 h-5 text-indigo-600" /> Chi Tiết Khen Thưởng & Vi Phạm
+        </h2>
+        
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* CỘNG ĐIỂM / KHEN THƯỞNG */}
+          <div className="border border-emerald-200 rounded-xl p-4 bg-emerald-50/30 space-y-2">
+            <h3 className="font-bold text-emerald-800 text-xs flex items-center justify-between">
+              <span>🌟 Khen Thưởng (+{totalBonus} điểm)</span>
+              <span className="text-[11px] font-normal text-emerald-600">{commendations.length} lượt</span>
+            </h3>
+            {commendations.length === 0 ? (
+              <p className="text-xs text-slate-400 italic">Chưa có ghi nhận khen thưởng.</p>
+            ) : (
+              <div className="space-y-2">
+                {commendations.map((c: any) => (
+                  <div key={c.id} className="bg-white p-2.5 rounded-lg border border-emerald-100 text-xs flex justify-between items-center">
+                    <div>
+                      <p className="font-semibold text-slate-800">{c.content}</p>
+                      <p className="text-[10px] text-slate-400">{c.created_date}</p>
+                    </div>
+                    <span className="font-extrabold text-emerald-600 bg-emerald-100 px-2 py-0.5 rounded text-xs">+{c.bonus_points}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* TRỪ ĐIỂM / VI PHẠM */}
+          <div className="border border-rose-200 rounded-xl p-4 bg-rose-50/30 space-y-2">
+            <h3 className="font-bold text-rose-800 text-xs flex items-center justify-between">
+              <span>⚠️ Vi Phạm / Điểm Trừ (-{totalPenalty} điểm)</span>
+              <span className="text-[11px] font-normal text-rose-600">{violations.length} lượt</span>
+            </h3>
+            {violations.length === 0 ? (
+              <p className="text-xs text-slate-400 italic">Chúc mừng! Bạn chưa mắc vi phạm nào.</p>
+            ) : (
+              <div className="space-y-2">
+                {violations.map((v: any) => (
+                  <div key={v.id} className="bg-white p-2.5 rounded-lg border border-rose-100 text-xs flex justify-between items-center">
+                    <div>
+                      <p className="font-semibold text-slate-800">{v.content}</p>
+                      <p className="text-[10px] text-slate-400">{v.created_date}</p>
+                    </div>
+                    <span className="font-extrabold text-rose-600 bg-rose-100 px-2 py-0.5 rounded text-xs">-{v.penalty_points}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </section>
+
+      {/* CHI TIẾT TÌNH HÌNH THU CHI & HẠN NỘP */}
+      <section className="bg-white rounded-2xl border shadow-sm p-5 space-y-3">
+        <h2 className="font-bold text-slate-800 text-base flex items-center gap-2 border-b pb-2">
+          <Wallet className="w-5 h-5 text-indigo-600" /> Tình Hình Các Khoản Thu - Học Phí
+        </h2>
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-xs border-collapse">
+            <thead className="bg-slate-50 font-bold border-b text-slate-700">
+              <tr>
+                <th className="p-3 border-r">Tên Khoản Thu</th>
+                <th className="p-3 border-r text-right">Số Tiền</th>
+                <th className="p-3 border-r text-center">Hạn Cuối Nộp</th>
+                <th className="p-3 text-center">Trạng Thái</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y text-slate-700">
+              {feeItems.map((item: FeeItem) => {
+                const pay = feePayments.find((p: any) => p.student_id === student.id && p.fee_item_id === item.id);
+                const isPaid = pay?.is_paid || false;
+                return (
+                  <tr key={item.id} className="hover:bg-slate-50">
+                    <td className="p-3 border-r font-semibold text-slate-800">{item.title}</td>
+                    <td className="p-3 border-r text-right font-bold text-indigo-700">{item.amount.toLocaleString()} đ</td>
+                    <td className="p-3 border-r text-center text-slate-500">{item.deadline || 'Chưa quy định'}</td>
+                    <td className="p-3 text-center">
+                      {isPaid ? (
+                        <span className="bg-emerald-100 text-emerald-800 border border-emerald-300 px-3 py-1 rounded-full font-bold inline-flex items-center gap-1">
+                          <CheckCircle className="w-3.5 h-3.5" /> Đã nộp
+                        </span>
+                      ) : (
+                        <span className="bg-rose-100 text-rose-800 border border-rose-300 px-3 py-1 rounded-full font-bold inline-flex items-center gap-1">
+                          <XCircle className="w-3.5 h-3.5" /> Chưa nộp
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      {/* PHIẾU KHẢO SÁT */}
       {isSurveyOpen && !student.is_survey_submitted && (
         <div className="bg-white rounded-2xl border-2 border-indigo-500 shadow-lg p-6 space-y-4 text-xs">
           <h2 className="font-bold text-slate-800 text-base border-b pb-2">Phiếu Khảo Sát Thông Tin Học Sinh</h2>
@@ -273,46 +453,44 @@ function StudentPortal({ student, isSurveyOpen, feeItems, feePayments, violation
           </button>
         </div>
       )}
-
-      <div className="bg-gradient-to-r from-indigo-600 to-purple-600 text-white p-6 rounded-2xl flex justify-between items-center shadow-md">
-        <div>
-          <h2 className="text-lg font-bold">Điểm Thi Đua Cá Nhân</h2>
-          <p className="text-xs text-indigo-100">Điểm cơ bản (100) + Cộng ({totalBonus}) - Trừ ({totalPenalty})</p>
-        </div>
-        <span className="text-3xl font-extrabold">{100 + totalBonus - totalPenalty} ĐIỂM</span>
-      </div>
     </div>
   );
 }
 
 // 3. MÀN HÌNH QUẢN LÝ GIÁO VIÊN
-function TeacherDashboard({ students, setStudents, isSurveyOpen, setIsSurveyOpen, feeItems, setFeeItems, feePayments, setFeePayments, weeklyViolations, setWeeklyViolations, weeklyCommendations, setWeeklyCommendations }: any) {
-  const [activeTab, setActiveTab] = useState<'students' | 'finance' | 'emulation'>('students');
+function TeacherDashboard({ students, setStudents, isSurveyOpen, setIsSurveyOpen, feeItems, setFeeItems, feePayments, setFeePayments, weeklyViolations, setWeeklyViolations, weeklyCommendations, setWeeklyCommendations, announcements, setAnnouncements }: any) {
+  const [activeTab, setActiveTab] = useState<'students' | 'finance' | 'emulation' | 'announcements'>('students');
   const [selectedStudentDetail, setSelectedStudentDetail] = useState<Student | null>(null);
 
-  // State Form Thêm HS mới
+  // Form Thêm HS mới
   const [isAddStudentOpen, setIsAddStudentOpen] = useState(false);
   const [newCode, setNewCode] = useState('');
   const [newName, setNewName] = useState('');
   const [newGroup, setNewGroup] = useState(1);
 
-  // State Form Thu Chi
+  // Form Thu Chi
   const [newFeeTitle, setNewFeeTitle] = useState('');
   const [newFeeAmount, setNewFeeAmount] = useState('');
+  const [newFeeDeadline, setNewFeeDeadline] = useState('');
 
-  // State Form Vi phạm
+  // Form Vi phạm
   const [vioStudentId, setVioStudentId] = useState('');
   const [vioContent, setVioContent] = useState('');
   const [vioPoints, setVioPenalty] = useState(1);
   const [vioDate, setVioDate] = useState(new Date().toISOString().split('T')[0]);
 
-  // State Form Khen thưởng
+  // Form Khen thưởng
   const [comStudentId, setComStudentId] = useState('');
   const [comContent, setComContent] = useState('');
   const [comPoints, setComBonus] = useState(2);
   const [comDate, setComDate] = useState(new Date().toISOString().split('T')[0]);
 
-  // Thao tác 1: Thêm học sinh
+  // Form Thông báo
+  const [annTitle, setAnnTitle] = useState('');
+  const [annContent, setAnnContent] = useState('');
+  const [annImportant, setAnnImportant] = useState(false);
+
+  // Thao tác Thêm học sinh
   const handleAddStudent = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newCode || !newName) return;
@@ -332,34 +510,33 @@ function TeacherDashboard({ students, setStudents, isSurveyOpen, setIsSurveyOpen
     alert('Đã thêm học sinh mới thành công!');
   };
 
-  // Thao tác 2: Xóa học sinh
   const handleDeleteStudent = (id: string, name: string) => {
     if (confirm(`Bạn có chắc chắn muốn xóa học sinh ${name}?`)) {
       setStudents(students.filter((s: any) => s.id !== id));
     }
   };
 
-  // Thao tác 3: Đổi chức vụ Ban cán sự
   const handleUpdateRole = (id: string, role: string) => {
     setStudents(students.map((s: any) => s.id === id ? { ...s, class_role: role } : s));
   };
 
-  // Thao tác 4: Tạo khoản thu mới
+  // Tạo khoản thu mới
   const handleAddFeeItem = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newFeeTitle || !newFeeAmount) return;
     const newItem: FeeItem = {
       id: Date.now().toString(),
       title: newFeeTitle,
-      amount: Number(newFeeAmount)
+      amount: Number(newFeeAmount),
+      deadline: newFeeDeadline || 'Chưa quy định'
     };
     setFeeItems([...feeItems, newItem]);
     setNewFeeTitle('');
     setNewFeeAmount('');
+    setNewFeeDeadline('');
     alert('Đã tạo khoản thu mới thành công!');
   };
 
-  // Thao tác 5: Đánh dấu đã nộp / chưa nộp tiền
   const handleTogglePayment = (studentId: string, feeItemId: string) => {
     const existing = feePayments.find((p: any) => p.student_id === studentId && p.fee_item_id === feeItemId);
     if (existing) {
@@ -369,7 +546,7 @@ function TeacherDashboard({ students, setStudents, isSurveyOpen, setIsSurveyOpen
     }
   };
 
-  // Thao tác 6: Ghi nhận vi phạm
+  // Vi phạm & Khen thưởng
   const handleAddViolation = (e: React.FormEvent) => {
     e.preventDefault();
     if (!vioStudentId || !vioContent) return;
@@ -386,7 +563,6 @@ function TeacherDashboard({ students, setStudents, isSurveyOpen, setIsSurveyOpen
     alert('Đã thêm ghi nhận vi phạm thành công!');
   };
 
-  // Thao tác 7: Ghi nhận khen thưởng
   const handleAddCommendation = (e: React.FormEvent) => {
     e.preventDefault();
     if (!comStudentId || !comContent) return;
@@ -403,7 +579,29 @@ function TeacherDashboard({ students, setStudents, isSurveyOpen, setIsSurveyOpen
     alert('Đã thêm khen thưởng thành công!');
   };
 
-  // Thao tác 8: Xuất file Excel
+  // Tạo thông báo mới
+  const handleAddAnnouncement = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!annTitle || !annContent) return;
+    const newAnn: Announcement = {
+      id: Date.now().toString(),
+      title: annTitle,
+      content: annContent,
+      created_date: new Date().toISOString().split('T')[0],
+      important: annImportant
+    };
+    setAnnouncements([newAnn, ...announcements]);
+    setAnnTitle('');
+    setAnnContent('');
+    setAnnImportant(false);
+    alert('Đã đăng thông báo mới tới học sinh!');
+  };
+
+  const handleDeleteAnnouncement = (id: string) => {
+    setAnnouncements(announcements.filter((a: Announcement) => a.id !== id));
+  };
+
+  // Xuất file Excel
   const handleExportExcel = () => {
     const dataStudents = students.map((s: any, idx: number) => ({
       'STT': idx + 1, 'MSHS': s.code, 'Họ và Tên': s.full_name, 'Tổ': `Tổ ${s.group_number}`, 'Chức Vụ Lớp': s.class_role, 'SĐT': s.phone
@@ -430,6 +628,9 @@ function TeacherDashboard({ students, setStudents, isSurveyOpen, setIsSurveyOpen
       <nav className="bg-white border-b px-6 flex space-x-6">
         <button onClick={() => setActiveTab('students')} className={`py-3 px-2 border-b-2 font-medium text-sm ${activeTab === 'students' ? 'border-indigo-600 text-indigo-600' : 'text-slate-500'}`}>
           Danh sách & Lý lịch
+        </button>
+        <button onClick={() => setActiveTab('announcements')} className={`py-3 px-2 border-b-2 font-medium text-sm ${activeTab === 'announcements' ? 'border-indigo-600 text-indigo-600' : 'text-slate-500'}`}>
+          Thông Báo Tuần
         </button>
         <button onClick={() => setActiveTab('finance')} className={`py-3 px-2 border-b-2 font-medium text-sm ${activeTab === 'finance' ? 'border-indigo-600 text-indigo-600' : 'text-slate-500'}`}>
           Quản Lý Thu Chi
@@ -499,14 +700,67 @@ function TeacherDashboard({ students, setStudents, isSurveyOpen, setIsSurveyOpen
           </div>
         )}
 
-        {/* TAB 2: THU CHI */}
+        {/* TAB 2: THÔNG BÁO TUẦN */}
+        {activeTab === 'announcements' && (
+          <div className="space-y-6 max-w-4xl">
+            <div className="bg-white p-5 rounded-xl border shadow-sm space-y-3 text-xs">
+              <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2 border-b pb-2">
+                <Bell className="w-4 h-4 text-indigo-600" /> Tạo Thông Báo / Nhiệm Vụ Trong Tuần
+              </h3>
+              <form onSubmit={handleAddAnnouncement} className="space-y-3">
+                <div>
+                  <label className="font-semibold block mb-1">Tiêu đề thông báo (*):</label>
+                  <input type="text" placeholder="VD: Nộp tiền Bảo hiểm y tế" value={annTitle} onChange={e => setAnnTitle(e.target.value)} className="w-full p-2 border rounded" required />
+                </div>
+                <div>
+                  <label className="font-semibold block mb-1">Nội dung phổ biến chi tiết (*):</label>
+                  <textarea rows={3} placeholder="Nội dung cần dặn dò các em học sinh..." value={annContent} onChange={e => setAnnContent(e.target.value)} className="w-full p-2 border rounded" required />
+                </div>
+                <div className="flex items-center gap-2">
+                  <input type="checkbox" id="important" checked={annImportant} onChange={e => setAnnImportant(e.target.checked)} className="rounded text-indigo-600 focus:ring-indigo-500 h-4 w-4" />
+                  <label htmlFor="important" className="font-semibold text-slate-700">Đánh dấu là thông báo QUAN TRỌNG / KHẨN CẤP</label>
+                </div>
+                <button type="submit" className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-lg flex items-center gap-1.5">
+                  <Send className="w-4 h-4" /> Đăng Thông Báo Đến Học Sinh
+                </button>
+              </form>
+            </div>
+
+            <div className="bg-white rounded-xl border shadow-sm p-4 space-y-3">
+              <h3 className="font-bold text-slate-800 text-sm">Danh Sách Thông Báo Đã Đăng</h3>
+              {announcements.length === 0 ? (
+                <p className="text-xs text-slate-400 italic">Chưa đăng thông báo nào.</p>
+              ) : (
+                <div className="space-y-3">
+                  {announcements.map((a: Announcement) => (
+                    <div key={a.id} className="p-3 border rounded-xl flex justify-between items-start gap-3 bg-slate-50 text-xs">
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-slate-800 text-sm">{a.title}</span>
+                          {a.important && <span className="bg-rose-100 text-rose-700 font-bold px-2 py-0.5 rounded text-[10px]">Quan trọng</span>}
+                          <span className="text-[10px] text-slate-400">({a.created_date})</span>
+                        </div>
+                        <p className="text-slate-600 whitespace-pre-line">{a.content}</p>
+                      </div>
+                      <button onClick={() => handleDeleteAnnouncement(a.id)} className="text-slate-400 hover:text-rose-600 p-1">
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* TAB 3: THU CHI */}
         {activeTab === 'finance' && (
           <div className="space-y-6">
             <div className="bg-white p-4 rounded-xl border shadow-sm space-y-3 text-xs">
               <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2">
                 <Plus className="w-4 h-4 text-indigo-600" /> Tạo Khoản Thu Mới
               </h3>
-              <form onSubmit={handleAddFeeItem} className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
+              <form onSubmit={handleAddFeeItem} className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
                 <div>
                   <label className="font-semibold block mb-1">Tên khoản thu (*):</label>
                   <input type="text" placeholder="VD: Tiền kế hoạch nhỏ" value={newFeeTitle} onChange={e => setNewFeeTitle(e.target.value)} className="w-full p-2 border rounded" required />
@@ -514,6 +768,10 @@ function TeacherDashboard({ students, setStudents, isSurveyOpen, setIsSurveyOpen
                 <div>
                   <label className="font-semibold block mb-1">Số tiền (VNĐ) (*):</label>
                   <input type="number" placeholder="VD: 50000" value={newFeeAmount} onChange={e => setNewFeeAmount(e.target.value)} className="w-full p-2 border rounded" required />
+                </div>
+                <div>
+                  <label className="font-semibold block mb-1">Hạn cuối nộp:</label>
+                  <input type="date" value={newFeeDeadline} onChange={e => setNewFeeDeadline(e.target.value)} className="w-full p-2 border rounded" />
                 </div>
                 <button type="submit" className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-lg">
                   + Tạo Khoản Thu
@@ -529,7 +787,8 @@ function TeacherDashboard({ students, setStudents, isSurveyOpen, setIsSurveyOpen
                     <th className="p-3 border-r min-w-[180px]">Học sinh</th>
                     {feeItems.map((item: any) => (
                       <th key={item.id} className="p-3 border-r text-center">
-                        {item.title} ({item.amount.toLocaleString()}đ)
+                        <div>{item.title} ({item.amount.toLocaleString()}đ)</div>
+                        <div className="text-[10px] font-normal text-slate-500">Hạn: {item.deadline || 'Không có'}</div>
                       </th>
                     ))}
                   </tr>
@@ -558,7 +817,7 @@ function TeacherDashboard({ students, setStudents, isSurveyOpen, setIsSurveyOpen
           </div>
         )}
 
-        {/* TAB 3: THI ĐỦA */}
+        {/* TAB 4: THI ĐỦA */}
         {activeTab === 'emulation' && (
           <div className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

@@ -107,7 +107,7 @@ export default function App() {
       {/* HEADER TỔNG */}
       <div className="bg-gradient-to-r from-indigo-700 via-indigo-600 to-purple-600 text-white text-xs py-2.5 px-4 font-bold flex justify-between items-center shadow-md">
         <span className="flex items-center gap-1.5">
-          ✨ Phần Mềm Quản Lý Lớp Chủ Nhiệm SaaS - THPT
+          ✨ Phần Mềm Quản Lý Lớp Chủ Nhiệm 
         </span>
         <div className="flex items-center gap-2">
           {currentTeacher && <span className="bg-indigo-900/60 border border-indigo-400/30 px-2.5 py-1 rounded-full text-[11px]">👤 GV: {currentTeacher.full_name}</span>}

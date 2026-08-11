@@ -64,12 +64,6 @@ interface StudentRecord {
 }
 
 // ==================== CẤU HÌNH THANH TOÁN ====================
-const BANK_INFO = {
-  BANK_ID: "MB",
-  ACCOUNT_NO: "0912345678",
-  ACCOUNT_NAME: "NGUYEN VAN A",
-  PRICE_PER_YEAR: 500000
-};
 
 type ViewType =
   | 'login' | 'forgot_password' | 'reset_password' | 'register_payment'

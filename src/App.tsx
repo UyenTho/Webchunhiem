@@ -1,9 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  Users, Wallet, CheckCircle, XCircle, Trash2, Award, LogOut, 
+import {
+  Users, Wallet, CheckCircle, XCircle, Trash2, Award, LogOut,
   ShieldAlert, Trophy, Bell, AlertCircle, RefreshCw, BookOpen, FileText
 } from 'lucide-react';
-import emailjs from '@emailjs/browser';
 import { supabase } from './supabaseClient';
 
 // ==================== INTERFACES ====================
@@ -11,10 +10,10 @@ interface Teacher {
   id: string;
   full_name: string;
   email: string;
-  password?: string;
   phone: string;
   school?: string;
   is_approved: boolean;
+  is_admin: boolean;
 }
 
 interface Student {
@@ -64,11 +63,7 @@ interface StudentRecord {
   created_at?: string;
 }
 
-// ==================== CẤU HÌNH EMAILJS & BANK ====================
-const EMAILJS_SERVICE_ID = "service_abc123"; 
-const EMAILJS_TEMPLATE_ID = "template_xyz890"; 
-const EMAILJS_PUBLIC_KEY = "YOUR_PUBLIC_KEY"; 
-
+// ==================== CẤU HÌNH THANH TOÁN ====================
 const BANK_INFO = {
   BANK_ID: "MB",
   ACCOUNT_NO: "0912345678",
@@ -76,9 +71,13 @@ const BANK_INFO = {
   PRICE_PER_YEAR: 500000
 };
 
+type ViewType =
+  | 'login' | 'forgot_password' | 'reset_password' | 'register_payment'
+  | 'admin' | 'teacher' | 'student_portal' | 'class_leader_portal';
+
 export default function App() {
-  const [currentView, setCurrentView] = useState<'login' | 'forgot_password' | 'register_payment' | 'admin' | 'teacher' | 'student_portal' | 'class_leader_portal'>('login');
-  
+  const [currentView, setCurrentView] = useState<ViewType>('login');
+
   const [teachers, setTeachers] = useState<Teacher[]>([]);
   const [currentTeacher, setCurrentTeacher] = useState<Teacher | null>(null);
   const [loggedInStudent, setLoggedInStudent] = useState<Student | null>(null);
@@ -92,11 +91,19 @@ export default function App() {
     }
   };
 
+  // Lắng nghe sự kiện "Quên mật khẩu": khi người dùng bấm link trong email,
+  // Supabase sẽ tự tạo phiên đăng nhập tạm và bắn event PASSWORD_RECOVERY.
   useEffect(() => {
-    fetchTeachers();
+    const { data: listener } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'PASSWORD_RECOVERY') {
+        setCurrentView('reset_password');
+      }
+    });
+    return () => listener.subscription.unsubscribe();
   }, []);
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
     setCurrentTeacher(null);
     setLoggedInStudent(null);
     setCurrentView('login');
@@ -122,10 +129,10 @@ export default function App() {
 
       {/* ROUTING MÀN HÌNH */}
       {currentView === 'login' && (
-        <LoginScreen 
+        <LoginScreen
           onTeacherLogin={(teacher: Teacher) => { setCurrentTeacher(teacher); setCurrentView('teacher'); }}
-          onStudentLogin={(student: Student) => { 
-            setLoggedInStudent(student); 
+          onStudentLogin={(student: Student) => {
+            setLoggedInStudent(student);
             if (student.class_role === 'Lớp trưởng') {
               setCurrentView('class_leader_portal');
             } else {
@@ -142,14 +149,18 @@ export default function App() {
       )}
 
       {currentView === 'register_payment' && (
-        <RegisterWithPaymentScreen 
-          onSuccess={async () => { await fetchTeachers(); setCurrentView('login'); }}
+        <RegisterWithPaymentScreen
+          onSuccess={() => setCurrentView('login')}
           onCancel={() => setCurrentView('login')}
         />
       )}
 
       {currentView === 'forgot_password' && (
         <ForgotPasswordScreen onBackToLogin={() => setCurrentView('login')} />
+      )}
+
+      {currentView === 'reset_password' && (
+        <ResetPasswordScreen onDone={() => setCurrentView('login')} />
       )}
 
       {currentView === 'admin' && (
@@ -165,10 +176,13 @@ export default function App() {
       )}
 
       {currentView === 'student_portal' && loggedInStudent && (
-        <StudentPortal student={loggedInStudent} onRefreshStudent={async () => {
-          const { data } = await supabase.from('students').select('*').eq('id', loggedInStudent.id).single();
-          if (data) setLoggedInStudent(data as Student);
-        }} />
+        <StudentPortal
+          student={loggedInStudent}
+          onRefreshStudent={async () => {
+            const { data } = await supabase.rpc('student_login', { p_code: loggedInStudent.code });
+            if (data) setLoggedInStudent(data as Student);
+          }}
+        />
       )}
     </div>
   );
@@ -178,9 +192,8 @@ export default function App() {
 function LoginScreen({ onTeacherLogin, onStudentLogin, onAdminLogin, onForgotPassword, onRegister }: any) {
   const [role, setRole] = useState<'teacher' | 'student' | 'admin'>('teacher');
   const [email, setEmail] = useState('');
-  const [teacherPassword, setTeacherPassword] = useState('');
+  const [password, setPassword] = useState('');
   const [studentCode, setStudentCode] = useState('');
-  const [adminPassword, setAdminPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -189,55 +202,61 @@ function LoginScreen({ onTeacherLogin, onStudentLogin, onAdminLogin, onForgotPas
     setError('');
     setLoading(true);
 
-    if (role === 'admin') {
-      setLoading(false);
-      if (adminPassword === 'admin123') onAdminLogin();
-      else setError('Mật khẩu Admin không đúng! (Mặc định: admin123)');
-      return;
-    }
+    if (role === 'teacher' || role === 'admin') {
+      const { data: authData, error: authErr } = await supabase.auth.signInWithPassword({
+        email: email.trim().toLowerCase(),
+        password: password,
+      });
 
-    if (role === 'teacher') {
-      const inputEmail = email.trim().toLowerCase();
-      const { data, error: fetchErr } = await supabase.from('teachers').select('*').eq('email', inputEmail);
+      if (authErr || !authData.user) {
+        setLoading(false);
+        setError('Email hoặc mật khẩu không đúng!');
+        return;
+      }
+
+      const { data: profile, error: profErr } = await supabase
+        .from('teachers')
+        .select('*')
+        .eq('id', authData.user.id)
+        .single();
+
       setLoading(false);
 
-      if (fetchErr) {
-        if (fetchErr.message.includes('public.teachers')) {
-          setError('Lỗi Database: Chưa tạo bảng teachers trong Supabase. Vui lòng chạy lệnh SQL khởi tạo!');
-        } else {
-          setError('Lỗi kết nối: ' + fetchErr.message);
+      if (profErr || !profile) {
+        setError('Không tìm thấy hồ sơ giáo viên tương ứng.');
+        await supabase.auth.signOut();
+        return;
+      }
+
+      if (role === 'admin') {
+        if (!profile.is_admin) {
+          setError('Tài khoản này không có quyền Quản trị viên.');
+          await supabase.auth.signOut();
+          return;
         }
+        onAdminLogin();
         return;
       }
 
-      if (!data || data.length === 0) {
-        setError('Email Gmail này CHƯA ĐĂNG KÝ mua bản quyền! Vui lòng nhấn Đăng ký.');
-        return;
-      }
-
-      const t = data[0] as Teacher;
-      if (!t.is_approved) {
+      // role === 'teacher'
+      if (!profile.is_approved) {
         setError('Tài khoản của thầy/cô ĐANG CHỜ ADMIN DUYỆT / CHƯA CHUYỂN TIỀN.');
+        await supabase.auth.signOut();
         return;
       }
 
-      if (t.password && t.password !== teacherPassword) {
-        setError('Mật khẩu giáo viên không chính xác!');
-        return;
-      }
-
-      onTeacherLogin(t);
+      onTeacherLogin(profile as Teacher);
       return;
     }
 
     if (role === 'student') {
-      const { data, error: stErr } = await supabase.from('students').select('*').eq('code', studentCode.trim().toUpperCase());
+      const { data, error: rpcErr } = await supabase.rpc('student_login', { p_code: studentCode.trim() });
       setLoading(false);
 
-      if (stErr || !data || data.length === 0) {
+      if (rpcErr || !data) {
         setError('Mã số MSHS không tồn tại trên hệ thống!');
       } else {
-        onStudentLogin(data[0] as Student);
+        onStudentLogin(data as Student);
       }
     }
   };
@@ -261,15 +280,15 @@ function LoginScreen({ onTeacherLogin, onStudentLogin, onAdminLogin, onForgotPas
         {error && <p className="p-3 bg-rose-50 text-rose-700 text-xs rounded-xl border border-rose-200 font-medium">{error}</p>}
 
         <form onSubmit={handleLogin} className="space-y-4 text-xs">
-          {role === 'teacher' && (
+          {(role === 'teacher' || role === 'admin') && (
             <>
               <div>
-                <label className="font-semibold block mb-1">Email Gmail giáo viên:</label>
+                <label className="font-semibold block mb-1">Email Gmail:</label>
                 <input type="email" required placeholder="teacher@gmail.com" value={email} onChange={e => setEmail(e.target.value)} className="w-full p-3 border rounded-xl text-sm" />
               </div>
               <div>
                 <label className="font-semibold block mb-1">Mật khẩu:</label>
-                <input type="password" required placeholder="••••••••" value={teacherPassword} onChange={e => setTeacherPassword(e.target.value)} className="w-full p-3 border rounded-xl text-sm" />
+                <input type="password" required placeholder="••••••••" value={password} onChange={e => setPassword(e.target.value)} className="w-full p-3 border rounded-xl text-sm" />
               </div>
             </>
           )}
@@ -279,13 +298,6 @@ function LoginScreen({ onTeacherLogin, onStudentLogin, onAdminLogin, onForgotPas
               <label className="font-semibold block mb-1">Nhập Mã Số Học Sinh (MSHS):</label>
               <input type="text" required placeholder="VD: HS001" value={studentCode} onChange={e => setStudentCode(e.target.value)} className="w-full p-3 border rounded-xl text-sm uppercase font-mono" />
               <p className="text-[11px] text-indigo-600 mt-1.5 italic">* Lớp trưởng đăng nhập bằng MSHS sẽ được chuyển trực tiếp vào Cổng Báo Cáo.</p>
-            </div>
-          )}
-
-          {role === 'admin' && (
-            <div>
-              <label className="font-semibold block mb-1">Mật khẩu Quản trị viên:</label>
-              <input type="password" required value={adminPassword} onChange={e => setAdminPassword(e.target.value)} className="w-full p-3 border rounded-xl text-sm" />
             </div>
           )}
 
@@ -319,31 +331,34 @@ function RegisterWithPaymentScreen({ onSuccess, onCancel }: any) {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (password.length < 6) {
+      alert('Mật khẩu phải có ít nhất 6 ký tự.');
+      return;
+    }
     setLoading(true);
     const inputEmail = email.trim().toLowerCase();
 
-    const { data: existing, error: checkErr } = await supabase.from('teachers').select('id').eq('email', inputEmail);
-    
-    if (checkErr) {
-      setLoading(false);
-      alert('Lỗi CSDL: ' + checkErr.message + '\nHãy chạy script SQL trong Supabase Editor để khởi tạo bảng.');
-      return;
-    }
-
-    if (existing && existing.length > 0) {
-      setLoading(false);
-      alert('Email Gmail này ĐÃ ĐƯỢC ĐĂNG KÝ! Vui lòng chờ Admin duyệt hoặc quét QR xem lại.');
-      setIsSubmitted(true);
-      return;
-    }
-
-    const { error } = await supabase.from('teachers').insert([
-      { full_name: fullName, email: inputEmail, password: password, phone: phone, school: school, is_approved: false }
-    ]);
+    const { error } = await supabase.auth.signUp({
+      email: inputEmail,
+      password: password,
+      options: {
+        data: { full_name: fullName, phone: phone, school: school }
+      }
+    });
 
     setLoading(false);
-    if (error) alert('Lỗi đăng ký: ' + error.message);
-    else setIsSubmitted(true);
+
+    if (error) {
+      const msg = error.message.toLowerCase();
+      if (msg.includes('already') || msg.includes('registered') || msg.includes('exists')) {
+        alert('Email Gmail này ĐÃ ĐƯỢC ĐĂNG KÝ! Vui lòng đăng nhập hoặc dùng "Quên mật khẩu".');
+      } else {
+        alert('Lỗi đăng ký: ' + error.message);
+      }
+      return;
+    }
+
+    setIsSubmitted(true);
   };
 
   return (
@@ -362,8 +377,8 @@ function RegisterWithPaymentScreen({ onSuccess, onCancel }: any) {
               <input type="email" required placeholder="teacher@gmail.com" value={email} onChange={e => setEmail(e.target.value)} className="w-full p-2.5 border rounded-xl" />
             </div>
             <div>
-              <label className="font-semibold block mb-1">Tạo mật khẩu (*):</label>
-              <input type="password" required placeholder="••••••••" value={password} onChange={e => setPassword(e.target.value)} className="w-full p-2.5 border rounded-xl" />
+              <label className="font-semibold block mb-1">Tạo mật khẩu (*, tối thiểu 6 ký tự):</label>
+              <input type="password" required minLength={6} placeholder="••••••••" value={password} onChange={e => setPassword(e.target.value)} className="w-full p-2.5 border rounded-xl" />
             </div>
             <div>
               <label className="font-semibold block mb-1">Số điện thoại (*):</label>
@@ -381,6 +396,7 @@ function RegisterWithPaymentScreen({ onSuccess, onCancel }: any) {
           <div className="space-y-4 text-center">
             <div className="p-3.5 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl font-medium">
               Đơn đăng ký đã ghi nhận! Vui lòng chuyển khoản để Admin duyệt kích hoạt tài khoản.
+              (Nếu Supabase yêu cầu xác nhận Gmail, hãy kiểm tra hộp thư và bấm link xác nhận trước.)
             </div>
             <div className="bg-slate-50 p-4 border rounded-2xl inline-block shadow-inner">
               <img src={qrUrl} alt="Mã QR Thanh Toán" className="w-60 h-60 mx-auto rounded-xl shadow" />
@@ -440,30 +456,24 @@ function StudentPortal({ student, onRefreshStudent }: { student: Student; onRefr
 
   useEffect(() => {
     fetchStudentData();
-  }, [student]);
+  }, [student.id]);
 
   const fetchStudentData = async () => {
-    if (!student.teacher_id) return;
-
-    const { data: annData } = await supabase.from('announcements').select('*').eq('teacher_id', student.teacher_id).order('created_date', { ascending: false });
-    if (annData) setAnnouncements(annData as Announcement[]);
-
-    const { data: feeData } = await supabase.from('fee_items').select('*').eq('teacher_id', student.teacher_id);
-    if (feeData) setFeeItems(feeData as FeeItem[]);
-
-    const { data: payData } = await supabase.from('fee_payments').select('*').eq('student_id', student.id);
-    if (payData) setFeePayments(payData as FeePayment[]);
-
-    const { data: recData } = await supabase.from('student_records').select('*').eq('student_id', student.id).order('created_at', { ascending: false });
-    if (recData) setRecords(recData as StudentRecord[]);
+    const { data, error } = await supabase.rpc('get_student_portal_data', { p_student_id: student.id });
+    if (!error && data) {
+      setAnnouncements(data.announcements || []);
+      setFeeItems(data.fee_items || []);
+      setFeePayments(data.fee_payments || []);
+      setRecords(data.student_records || []);
+    }
   };
 
   const handleSaveSurvey = async (e: React.FormEvent) => {
     e.preventDefault();
-    const { error } = await supabase.from('students').update({
-      survey_completed: true,
-      survey_info: surveyData
-    }).eq('id', student.id);
+    const { error } = await supabase.rpc('submit_student_survey', {
+      p_student_id: student.id,
+      p_survey: surveyData
+    });
 
     if (error) {
       alert('Lỗi lưu khảo sát: ' + error.message);
@@ -571,7 +581,7 @@ function StudentPortal({ student, onRefreshStudent }: { student: Student; onRefr
 
             <h3 className="font-bold text-indigo-800 text-xs uppercase border-l-4 border-indigo-600 pl-2">IV. Công Thức Tính Điểm Tổng Kết</h3>
             <div className="bg-slate-100 p-3 rounded-xl font-mono text-center text-indigo-900 border font-bold">
-              $$\text{Điểm Tổng Kết HK} = 100 - (\text{Tổng Điểm Trừ Các Tuần}) + (\text{Tổng Điểm Cộng})$$
+              Điểm Tổng Kết HK = 100 − (Tổng Điểm Trừ Các Tuần) + (Tổng Điểm Cộng)
             </div>
           </div>
         </div>
@@ -668,7 +678,7 @@ function StudentPortal({ student, onRefreshStudent }: { student: Student; onRefr
             </div>
 
             <button type="submit" className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow transition">
-              Nộp Phường Thông Tin Khảo Sát
+              Nộp Phiếu Thông Tin Khảo Sát
             </button>
           </form>
         </div>
@@ -786,28 +796,25 @@ function ClassLeaderPortal({ student, onSwitchToStudentView }: { student: Studen
 
   useEffect(() => {
     fetchClassData();
-  }, [student]);
+  }, [student.id]);
 
   const fetchClassData = async () => {
-    if (!student.teacher_id) return;
-    const { data } = await supabase.from('students').select('*').eq('teacher_id', student.teacher_id);
-    if (data) setClassStudents(data as Student[]);
+    const { data, error } = await supabase.rpc('leader_get_classmates', { p_leader_id: student.id });
+    if (!error && data) setClassStudents(data as Student[]);
   };
 
   const handleAddIndividualRecord = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedStudentId || !content) return;
 
-    const { error } = await supabase.from('student_records').insert([
-      {
-        student_id: selectedStudentId,
-        teacher_id: student.teacher_id,
-        week_number: weekNumber,
-        type: recordType,
-        content: content,
-        points: points
-      }
-    ]);
+    const { error } = await supabase.rpc('leader_add_record', {
+      p_leader_id: student.id,
+      p_target_student_id: selectedStudentId,
+      p_week: weekNumber,
+      p_type: recordType,
+      p_content: content,
+      p_points: points
+    });
 
     if (!error) {
       alert('Đã lưu điểm vi phạm/khen thưởng cho học sinh!');
@@ -819,21 +826,20 @@ function ClassLeaderPortal({ student, onSwitchToStudentView }: { student: Studen
 
   const handleSubmitWeeklySummary = async (e: React.FormEvent) => {
     e.preventDefault();
-    const summaryText = `📊 BÁO CÁO THI ĐỦA TỔ TUẦN ${weekNumber}:\n- Tổ 1: ${groupScores.group1}đ | Tổ 2: ${groupScores.group2}đ\n- Tổ 3: ${groupScores.group3}đ | Tổ 4: ${groupScores.group4}đ\n\n📝 Ghi chú Lớp trưởng: ${leaderNote || 'Không có'}`;
+    const title = `[THI ĐUA LỚP TUẦN ${weekNumber}]`;
+    const summaryText = `📊 BÁO CÁO THI ĐUA TỔ TUẦN ${weekNumber}:\n- Tổ 1: ${groupScores.group1}đ | Tổ 2: ${groupScores.group2}đ\n- Tổ 3: ${groupScores.group3}đ | Tổ 4: ${groupScores.group4}đ\n\n📝 Ghi chú Lớp trưởng: ${leaderNote || 'Không có'}`;
 
-    const { error } = await supabase.from('announcements').insert([
-      {
-        teacher_id: student.teacher_id,
-        title: `[THI ĐỦA LỚP TUẦN ${weekNumber}]`,
-        content: summaryText,
-        important: true,
-        created_date: new Date().toISOString().slice(0, 10)
-      }
-    ]);
+    const { error } = await supabase.rpc('leader_submit_summary', {
+      p_leader_id: student.id,
+      p_title: title,
+      p_content: summaryText
+    });
 
     if (!error) {
       alert('Đã nộp báo cáo tổng hợp thi đua tuần cho Giáo viên chủ nhiệm!');
       setLeaderNote('');
+    } else {
+      alert('Lỗi: ' + error.message);
     }
   };
 
@@ -950,7 +956,7 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
 
   useEffect(() => {
     fetchData();
-  }, [teacher]);
+  }, [teacher.id]);
 
   const fetchData = async () => {
     const { data: stData } = await supabase.from('students').select('*').eq('teacher_id', teacher.id).order('code', { ascending: true });
@@ -991,6 +997,8 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
     if (!error) {
       setFeeTitle(''); setFeeAmount(''); setFeeDeadline('');
       fetchData();
+    } else {
+      alert('Lỗi: ' + error.message);
     }
   };
 
@@ -1002,6 +1010,8 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
     if (!error) {
       setAnnTitle(''); setAnnContent('');
       fetchData();
+    } else {
+      alert('Lỗi: ' + error.message);
     }
   };
 
@@ -1210,18 +1220,11 @@ function AdminDashboard({ teachers, onRefresh }: { teachers: Teacher[]; onRefres
   const handleApprove = async (id: string) => {
     const { error } = await supabase.from('teachers').update({ is_approved: true }).eq('id', id);
     if (!error) { await onRefresh(); alert('Đã duyệt kích hoạt tài khoản!'); }
-  };
-
-  const handleResetPassword = async (id: string) => {
-    const newPass = prompt('Nhập mật khẩu mới cấp cho Giáo viên:');
-    if (newPass) {
-      const { error } = await supabase.from('teachers').update({ password: newPass }).eq('id', id);
-      if (!error) alert('Đã đổi mật khẩu giáo viên thành công!');
-    }
+    else alert('Lỗi: ' + error.message);
   };
 
   const handleDelete = async (id: string) => {
-    if (confirm('Xóa hẳn đơn này khỏi hệ thống?')) {
+    if (confirm('Xóa hẳn hồ sơ giáo viên này khỏi hệ thống? (Lưu ý: tài khoản đăng nhập gốc trên Supabase Auth cần được xóa riêng trong Authentication > Users nếu muốn xóa hoàn toàn.)')) {
       await supabase.from('teachers').delete().eq('id', id);
       await onRefresh();
     }
@@ -1232,7 +1235,7 @@ function AdminDashboard({ teachers, onRefresh }: { teachers: Teacher[]; onRefres
       <div className="bg-white p-6 rounded-2xl border shadow-sm flex justify-between items-center flex-wrap gap-3">
         <div>
           <h1 className="text-xl font-bold text-slate-800">Quản Trị Hệ Thống SaaS (Admin)</h1>
-          <p className="text-slate-500 mt-0.5">Duyệt giáo viên, cấp lại mật khẩu và quản lý đơn mua web</p>
+          <p className="text-slate-500 mt-0.5">Duyệt giáo viên và quản lý đơn mua web. Giáo viên tự đổi mật khẩu qua "Quên mật khẩu".</p>
         </div>
         <button onClick={onRefresh} className="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-2 rounded-xl font-bold flex items-center gap-1 shadow">
           <RefreshCw className="w-3.5 h-3.5" /> Làm Mới Danh Sách
@@ -1247,7 +1250,7 @@ function AdminDashboard({ teachers, onRefresh }: { teachers: Teacher[]; onRefres
               <th className="p-3 border-r">Email Gmail</th>
               <th className="p-3 border-r">SĐT</th>
               <th className="p-3 border-r text-center">Trạng Thái</th>
-              <th className="p-3 text-center">Thao Tác Duyệt & Mật Khẩu</th>
+              <th className="p-3 text-center">Thao Tác</th>
             </tr>
           </thead>
           <tbody className="divide-y text-slate-700">
@@ -1267,7 +1270,6 @@ function AdminDashboard({ teachers, onRefresh }: { teachers: Teacher[]; onRefres
                   {!t.is_approved && (
                     <button onClick={() => handleApprove(t.id)} className="bg-emerald-600 hover:bg-emerald-700 text-white px-2.5 py-1 rounded-lg font-bold">Duyệt Đã Nộp Tiền</button>
                   )}
-                  <button onClick={() => handleResetPassword(t.id)} className="bg-indigo-600 hover:bg-indigo-700 text-white px-2.5 py-1 rounded-lg font-bold">Cấp Lại Pass</button>
                   <button onClick={() => handleDelete(t.id)} className="p-1 text-slate-400 hover:text-rose-600">
                     <Trash2 className="w-4 h-4 inline" />
                   </button>
@@ -1281,77 +1283,95 @@ function AdminDashboard({ teachers, onRefresh }: { teachers: Teacher[]; onRefres
   );
 }
 
-// ==================== 7. CẤP LẠI MẬT KHẨU QUA EMAILJS ====================
+// ==================== 7. QUÊN MẬT KHẨU (Supabase Auth) ====================
 function ForgotPasswordScreen({ onBackToLogin }: { onBackToLogin: () => void }) {
   const [email, setEmail] = useState('');
-  const [otpSent, setOtpSent] = useState(false);
-  const [generatedOtp, setGeneratedOtp] = useState('');
-  const [userOtp, setUserOtp] = useState('');
+  const [sent, setSent] = useState(false);
+  const [loading, setLoading] = useState(false);
 
-  const handleSendOtp = async (e: React.FormEvent) => {
+  const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
-    const { data } = await supabase.from('teachers').select('*').eq('email', email.trim().toLowerCase());
-    if (!data || data.length === 0) {
-      alert('Email Gmail này chưa đăng ký hệ thống!');
+    setLoading(true);
+    const { error } = await supabase.auth.resetPasswordForEmail(email.trim().toLowerCase(), {
+      redirectTo: window.location.origin,
+    });
+    setLoading(false);
+    if (error) {
+      alert('Lỗi: ' + error.message);
       return;
     }
-
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    setGeneratedOtp(otp);
-
-    emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, {
-      to_name: data[0].full_name,
-      to_email: email,
-      otp_code: otp
-    }, EMAILJS_PUBLIC_KEY)
-    .then(() => {
-      setOtpSent(true);
-      alert('Mã OTP đã được gửi về Gmail!');
-    })
-    .catch(() => {
-      setOtpSent(true);
-      alert(`⚠️ Mã OTP khôi phục của bạn là: ${otp}`);
-    });
-  };
-
-  const handleVerifyOtp = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (userOtp.trim() === generatedOtp) {
-      alert('Xác thực OTP thành công! Vui lòng liên hệ Admin hoặc đăng nhập lại.');
-      onBackToLogin();
-    } else {
-      alert('Mã OTP không đúng!');
-    }
+    setSent(true);
   };
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4 text-xs">
       <div className="bg-white max-w-md w-full rounded-2xl shadow-xl p-8 space-y-4">
-        <h2 className="text-xl font-bold text-slate-800 text-center">Cấp Lại Quyền Đăng Nhập Qua EmailJS</h2>
+        <h2 className="text-xl font-bold text-slate-800 text-center">Khôi Phục Mật Khẩu</h2>
 
-        {!otpSent ? (
-          <form onSubmit={handleSendOtp} className="space-y-3">
+        {!sent ? (
+          <form onSubmit={handleSend} className="space-y-3">
             <div>
-              <label className="font-semibold block mb-1">Nhập Email Gmail giáo viên:</label>
+              <label className="font-semibold block mb-1">Nhập Email Gmail giáo viên đã đăng ký:</label>
               <input type="email" required placeholder="teacher@gmail.com" value={email} onChange={e => setEmail(e.target.value)} className="w-full p-2.5 border rounded-xl" />
             </div>
-            <button type="submit" className="w-full py-3 bg-indigo-600 text-white rounded-xl font-bold shadow">
-              Gửi Mã OTP Khôi Phục Qua Gmail
+            <button type="submit" disabled={loading} className="w-full py-3 bg-indigo-600 text-white rounded-xl font-bold shadow">
+              {loading ? 'Đang gửi...' : 'Gửi Link Đặt Lại Mật Khẩu'}
             </button>
           </form>
         ) : (
-          <form onSubmit={handleVerifyOtp} className="space-y-3">
-            <div>
-              <label className="font-semibold block mb-1">Nhập Mã OTP (6 số):</label>
-              <input type="text" required placeholder="123456" value={userOtp} onChange={e => setUserOtp(e.target.value)} className="w-full p-2.5 border rounded-xl text-center text-lg font-bold font-mono" />
-            </div>
-            <button type="submit" className="w-full py-3 bg-emerald-600 text-white rounded-xl font-bold shadow">
-              Xác Nhận Mã OTP
-            </button>
-          </form>
+          <div className="p-3.5 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl font-medium text-center">
+            Đã gửi email chứa link đặt lại mật khẩu! Vui lòng kiểm tra hộp thư (kể cả mục Spam) và bấm vào link để đặt mật khẩu mới.
+          </div>
         )}
 
         <button onClick={onBackToLogin} className="w-full text-center text-slate-400 hover:underline block">Quay lại Đăng nhập</button>
+      </div>
+    </div>
+  );
+}
+
+// ==================== 8. ĐẶT LẠI MẬT KHẨU MỚI (sau khi bấm link email) ====================
+function ResetPasswordScreen({ onDone }: { onDone: () => void }) {
+  const [password, setPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    if (password.length < 6) { setError('Mật khẩu phải có ít nhất 6 ký tự.'); return; }
+    if (password !== confirm) { setError('Mật khẩu nhập lại không khớp.'); return; }
+
+    setLoading(true);
+    const { error: updateErr } = await supabase.auth.updateUser({ password });
+    setLoading(false);
+
+    if (updateErr) { setError('Lỗi: ' + updateErr.message); return; }
+
+    alert('Đã đổi mật khẩu thành công! Vui lòng đăng nhập lại.');
+    await supabase.auth.signOut();
+    onDone();
+  };
+
+  return (
+    <div className="min-h-screen flex items-center justify-center p-4 text-xs">
+      <div className="bg-white max-w-md w-full rounded-2xl shadow-xl p-8 space-y-4">
+        <h2 className="text-xl font-bold text-slate-800 text-center">Đặt Mật Khẩu Mới</h2>
+        {error && <p className="p-3 bg-rose-50 text-rose-700 rounded-xl border border-rose-200 font-medium">{error}</p>}
+        <form onSubmit={handleSubmit} className="space-y-3">
+          <div>
+            <label className="font-semibold block mb-1">Mật khẩu mới:</label>
+            <input type="password" required minLength={6} value={password} onChange={e => setPassword(e.target.value)} className="w-full p-2.5 border rounded-xl" />
+          </div>
+          <div>
+            <label className="font-semibold block mb-1">Nhập lại mật khẩu mới:</label>
+            <input type="password" required minLength={6} value={confirm} onChange={e => setConfirm(e.target.value)} className="w-full p-2.5 border rounded-xl" />
+          </div>
+          <button type="submit" disabled={loading} className="w-full py-3 bg-emerald-600 text-white rounded-xl font-bold shadow">
+            {loading ? 'Đang lưu...' : 'Xác Nhận Đổi Mật Khẩu'}
+          </button>
+        </form>
       </div>
     </div>
   );

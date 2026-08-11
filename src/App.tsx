@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import * as XLSX from 'xlsx';
 import {
   Users, Wallet, CheckCircle, XCircle, Trash2, Award, LogOut,
-  ShieldAlert, Trophy, Bell, AlertCircle, RefreshCw, BookOpen, FileText
+  ShieldAlert, Trophy, Bell, AlertCircle, RefreshCw, BookOpen, FileText, Calendar, PlusCircle
 } from 'lucide-react';
 import { supabase } from './supabaseClient';
 
@@ -808,7 +808,7 @@ function StudentPortal({ student, onRefreshStudent }: { student: Student; onRefr
   );
 }
 
-// ==================== 4. CỔNG BÁO CÁO DÀNH CHO LỚP TRƯỞNG ====================
+// ==================== 4. CỔNG BÁO CÁO DÀNH CHO LỚP TRƯỞNG (ĐÃ BỔ SUNG ĐẦY ĐỦ MỤC) ====================
 function ClassLeaderPortal({ student, onSwitchToStudentView }: { student: Student; onSwitchToStudentView: () => void }) {
   const [classStudents, setClassStudents] = useState<Student[]>([]);
   const [weekNumber, setWeekNumber] = useState<number>(1);
@@ -826,7 +826,12 @@ function ClassLeaderPortal({ student, onSwitchToStudentView }: { student: Studen
   }, [student.id]);
 
   const fetchClassData = async () => {
-    const { data, error } = await supabase.from('students').select('*').eq('teacher_id', student.teacher_id).order('code', { ascending: true });
+    const { data, error } = await supabase
+      .from('students')
+      .select('*')
+      .eq('teacher_id', student.teacher_id)
+      .order('code', { ascending: true });
+      
     if (!error && data) setClassStudents(data as Student[]);
   };
 
@@ -847,10 +852,10 @@ function ClassLeaderPortal({ student, onSwitchToStudentView }: { student: Studen
     ]);
 
     if (!error) {
-      alert('Đã ghi nhận điểm vi phạm/khen thưởng cho học sinh!');
+      alert('Đã lưu điểm vi phạm/khen thưởng thành công cho học sinh!');
       setContent('');
     } else {
-      alert('Lỗi: ' + error.message);
+      alert('Lỗi khi lưu điểm: ' + error.message);
     }
   };
 
@@ -870,10 +875,10 @@ function ClassLeaderPortal({ student, onSwitchToStudentView }: { student: Studen
     ]);
 
     if (!error) {
-      alert('Đã nộp báo cáo tổng hợp thi đua tuần cho Giáo viên chủ nhiệm!');
+      alert('Đã gửi báo cáo thi đua tuần tới Giáo viên chủ nhiệm!');
       setLeaderNote('');
     } else {
-      alert('Lỗi: ' + error.message);
+      alert('Lỗi nộp báo cáo: ' + error.message);
     }
   };
 
@@ -890,15 +895,16 @@ function ClassLeaderPortal({ student, onSwitchToStudentView }: { student: Studen
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {/* MỤC 1: LỚP TRƯỞNG NHẬP VI PHẠM / KHEN THƯỞNG CÁ NHÂN */}
         <div className="bg-white p-5 rounded-2xl border shadow-sm space-y-4">
           <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2 border-b pb-2">
-            <ShieldAlert className="w-4 h-4 text-indigo-600" /> Nhập Vi Phạm / Khen Thưởng Cá Nhân
+            <PlusCircle className="w-4 h-4 text-indigo-600" /> Nhập Vi Phạm / Khen Thưởng Cá Nhân
           </h2>
           <form onSubmit={handleAddIndividualRecord} className="space-y-3">
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="font-semibold block mb-1">Chọn Tuần Học (*):</label>
-                <input type="number" min="1" max="52" value={weekNumber} onChange={e => setWeekNumber(Number(e.target.value))} className="w-full p-2 border rounded-xl" required />
+                <input type="number" min="1" max="52" value={weekNumber} onChange={e => setWeekNumber(Number(e.target.value))} className="w-full p-2 border rounded-xl font-bold" required />
               </div>
               <div>
                 <label className="font-semibold block mb-1">Ngày Tháng Cụ Thể (*):</label>
@@ -908,8 +914,8 @@ function ClassLeaderPortal({ student, onSwitchToStudentView }: { student: Studen
 
             <div>
               <label className="font-semibold block mb-1">Chọn Học Sinh Trong Lớp (*):</label>
-              <select value={selectedStudentId} onChange={e => setSelectedStudentId(e.target.value)} className="w-full p-2 border rounded-xl" required>
-                <option value="">-- Chọn Học Sinh Trong Lớp --</option>
+              <select value={selectedStudentId} onChange={e => setSelectedStudentId(e.target.value)} className="w-full p-2 border rounded-xl text-xs" required>
+                <option value="">-- Chọn Học Sinh --</option>
                 {classStudents.map((s: Student) => (
                   <option key={s.id} value={s.id}>{s.full_name} (Tổ {s.group_number || 1}) - MSHS: {s.code}</option>
                 ))}
@@ -917,7 +923,7 @@ function ClassLeaderPortal({ student, onSwitchToStudentView }: { student: Studen
             </div>
 
             <div>
-              <label className="font-semibold block mb-1">Loại Ghi Nhận:</label>
+              <label className="font-semibold block mb-1">Loại Ghi Nhận (*):</label>
               <div className="grid grid-cols-2 gap-2">
                 <button type="button" onClick={() => setRecordType('violation')} className={`py-2 rounded-xl font-bold transition ${recordType === 'violation' ? 'bg-rose-600 text-white shadow' : 'bg-slate-100 text-slate-600'}`}>⚠️ Vi Phạm</button>
                 <button type="button" onClick={() => setRecordType('commendation')} className={`py-2 rounded-xl font-bold transition ${recordType === 'commendation' ? 'bg-emerald-600 text-white shadow' : 'bg-slate-100 text-slate-600'}`}>🌟 Khen Thưởng</button>
@@ -930,8 +936,8 @@ function ClassLeaderPortal({ student, onSwitchToStudentView }: { student: Studen
             </div>
 
             <div>
-              <label className="font-semibold block mb-1">Số điểm cộng / trừ:</label>
-              <input type="number" min="1" value={points} onChange={e => setPoints(Number(e.target.value))} className="w-full p-2 border rounded-xl font-bold" required />
+              <label className="font-semibold block mb-1">Số điểm cộng / trừ (*):</label>
+              <input type="number" min="1" value={points} onChange={e => setPoints(Number(e.target.value))} className="w-full p-2 border rounded-xl font-bold text-indigo-700" required />
             </div>
 
             <button type="submit" className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow transition">
@@ -940,6 +946,7 @@ function ClassLeaderPortal({ student, onSwitchToStudentView }: { student: Studen
           </form>
         </div>
 
+        {/* MỤC 2: LỚP TRƯỞNG BÁO CÁO ĐIỂM THI ĐỦA TỔ TUẦN */}
         <div className="bg-white p-5 rounded-2xl border shadow-sm space-y-4">
           <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2 border-b pb-2">
             <Trophy className="w-4 h-4 text-amber-500" /> Báo Cáo Điểm Thi Đua Các Tổ Trong Tuần
@@ -948,19 +955,19 @@ function ClassLeaderPortal({ student, onSwitchToStudentView }: { student: Studen
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="font-semibold block mb-1">Điểm Tổ 1:</label>
-                <input type="number" value={groupScores.group1} onChange={e => setGroupScores({ ...groupScores, group1: Number(e.target.value) })} className="w-full p-2 border rounded-xl font-bold text-center" />
+                <input type="number" value={groupScores.group1} onChange={e => setGroupScores({ ...groupScores, group1: Number(e.target.value) })} className="w-full p-2 border rounded-xl font-bold text-center text-indigo-700" />
               </div>
               <div>
                 <label className="font-semibold block mb-1">Điểm Tổ 2:</label>
-                <input type="number" value={groupScores.group2} onChange={e => setGroupScores({ ...groupScores, group2: Number(e.target.value) })} className="w-full p-2 border rounded-xl font-bold text-center" />
+                <input type="number" value={groupScores.group2} onChange={e => setGroupScores({ ...groupScores, group2: Number(e.target.value) })} className="w-full p-2 border rounded-xl font-bold text-center text-indigo-700" />
               </div>
               <div>
                 <label className="font-semibold block mb-1">Điểm Tổ 3:</label>
-                <input type="number" value={groupScores.group3} onChange={e => setGroupScores({ ...groupScores, group3: Number(e.target.value) })} className="w-full p-2 border rounded-xl font-bold text-center" />
+                <input type="number" value={groupScores.group3} onChange={e => setGroupScores({ ...groupScores, group3: Number(e.target.value) })} className="w-full p-2 border rounded-xl font-bold text-center text-indigo-700" />
               </div>
               <div>
                 <label className="font-semibold block mb-1">Điểm Tổ 4:</label>
-                <input type="number" value={groupScores.group4} onChange={e => setGroupScores({ ...groupScores, group4: Number(e.target.value) })} className="w-full p-2 border rounded-xl font-bold text-center" />
+                <input type="number" value={groupScores.group4} onChange={e => setGroupScores({ ...groupScores, group4: Number(e.target.value) })} className="w-full p-2 border rounded-xl font-bold text-center text-indigo-700" />
               </div>
             </div>
             <div>

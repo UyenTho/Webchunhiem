@@ -1,11 +1,68 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  Users, Wallet, CheckCircle, XCircle, Plus, Trash2, Award, LogOut, LogIn, Key, 
-  ShieldAlert, Eye, Trophy, Send, Bell, Clock, AlertCircle, Mail, UserCheck, 
-  RefreshCw, Check, BookOpen, HeartPulse, Sparkles, User, FileText, ChevronRight, HelpCircle
+  Users, Wallet, CheckCircle, XCircle, Trash2, Award, LogOut, 
+  ShieldAlert, Trophy, Bell, AlertCircle, RefreshCw, BookOpen, FileText
 } from 'lucide-react';
 import emailjs from '@emailjs/browser';
 import { supabase } from './supabaseClient';
+
+// ==================== INTERFACES (ĐỊNH NGHĨA KIỂU DỮ LIỆU CHUẨN TYPESCRIPT) ====================
+interface Teacher {
+  id: string;
+  full_name: string;
+  email: string;
+  password?: string;
+  phone: string;
+  school?: string;
+  is_approved: boolean;
+}
+
+interface Student {
+  id: string;
+  teacher_id: string;
+  code: string;
+  full_name: string;
+  dob?: string;
+  class_role?: string;
+  group_number?: number;
+  survey_completed?: boolean;
+  survey_info?: any;
+}
+
+interface FeeItem {
+  id: string;
+  teacher_id: string;
+  title: string;
+  amount: number;
+  deadline?: string;
+}
+
+interface FeePayment {
+  id: string;
+  student_id: string;
+  fee_item_id: string;
+  is_paid: boolean;
+}
+
+interface Announcement {
+  id: string;
+  teacher_id: string;
+  title: string;
+  content: string;
+  important: boolean;
+  created_date: string;
+}
+
+interface StudentRecord {
+  id: string;
+  student_id: string;
+  teacher_id: string;
+  week_number: number;
+  type: 'violation' | 'commendation';
+  content: string;
+  points: number;
+  created_at?: string;
+}
 
 // ==================== CẤU HÌNH EMAILJS & BANK ====================
 const EMAILJS_SERVICE_ID = "service_abc123"; 
@@ -22,14 +79,14 @@ const BANK_INFO = {
 export default function App() {
   const [currentView, setCurrentView] = useState<'login' | 'forgot_password' | 'register_payment' | 'admin' | 'teacher' | 'student_portal' | 'class_leader_portal'>('login');
   
-  const [teachers, setTeachers] = useState<any[]>([]);
-  const [currentTeacher, setCurrentTeacher] = useState<any | null>(null);
-  const [loggedInStudent, setLoggedInStudent] = useState<any | null>(null);
+  const [teachers, setTeachers] = useState<Teacher[]>([]);
+  const [currentTeacher, setCurrentTeacher] = useState<Teacher | null>(null);
+  const [loggedInStudent, setLoggedInStudent] = useState<Student | null>(null);
 
   const fetchTeachers = async () => {
     try {
       const { data, error } = await supabase.from('teachers').select('*').order('created_at', { ascending: false });
-      if (!error && data) setTeachers(data);
+      if (!error && data) setTeachers(data as Teacher[]);
     } catch (err) {
       console.error("Lỗi kết nối Supabase:", err);
     }
@@ -66,8 +123,8 @@ export default function App() {
       {/* ROUTING MÀN HÌNH */}
       {currentView === 'login' && (
         <LoginScreen 
-          onTeacherLogin={(teacher: any) => { setCurrentTeacher(teacher); setCurrentView('teacher'); }}
-          onStudentLogin={(student: any) => { 
+          onTeacherLogin={(teacher: Teacher) => { setCurrentTeacher(teacher); setCurrentView('teacher'); }}
+          onStudentLogin={(student: Student) => { 
             setLoggedInStudent(student); 
             if (student.class_role === 'Lớp trưởng') {
               setCurrentView('class_leader_portal');
@@ -110,7 +167,7 @@ export default function App() {
       {currentView === 'student_portal' && loggedInStudent && (
         <StudentPortal student={loggedInStudent} onRefreshStudent={async () => {
           const { data } = await supabase.from('students').select('*').eq('id', loggedInStudent.id).single();
-          if (data) setLoggedInStudent(data);
+          if (data) setLoggedInStudent(data as Student);
         }} />
       )}
     </div>
@@ -149,7 +206,7 @@ function LoginScreen({ onTeacherLogin, onStudentLogin, onAdminLogin, onForgotPas
         return;
       }
 
-      const t = data[0];
+      const t = data[0] as Teacher;
       if (!t.is_approved) {
         setError('Tài khoản của thầy/cô ĐANG CHỜ ADMIN DUYỆT / CHƯA CHUYỂN TIỀN.');
         return;
@@ -171,7 +228,7 @@ function LoginScreen({ onTeacherLogin, onStudentLogin, onAdminLogin, onForgotPas
       if (stErr || !data || data.length === 0) {
         setError('Mã số MSHS không tồn tại trên hệ thống!');
       } else {
-        onStudentLogin(data[0]);
+        onStudentLogin(data[0] as Student);
       }
     }
   };
@@ -328,11 +385,11 @@ function RegisterWithPaymentScreen({ onSuccess, onCancel }: any) {
 }
 
 // ==================== 3. CỔNG THÔNG TIN DÀNH CHO HỌC SINH ====================
-function StudentPortal({ student, onRefreshStudent }: any) {
-  const [announcements, setAnnouncements] = useState<any[]>([]);
-  const [feeItems, setFeeItems] = useState<any[]>([]);
-  const [feePayments, setFeePayments] = useState<any[]>([]);
-  const [records, setRecords] = useState<any[]>([]);
+function StudentPortal({ student, onRefreshStudent }: { student: Student; onRefreshStudent: () => void }) {
+  const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+  const [feeItems, setFeeItems] = useState<FeeItem[]>([]);
+  const [feePayments, setFeePayments] = useState<FeePayment[]>([]);
+  const [records, setRecords] = useState<StudentRecord[]>([]);
   const [showRules, setShowRules] = useState(false);
 
   // Trạng thái Form Khảo sát đầu năm
@@ -341,14 +398,14 @@ function StudentPortal({ student, onRefreshStudent }: any) {
     p_dob: student.dob || '',
     p_pob: '',
     p_address: '',
-    p_phone: student.phone || '',
+    p_phone: '',
     father_name: '',
     father_job: '',
     father_phone: '',
     mother_name: '',
     mother_job: '',
     mother_phone: '',
-    primary_contact: 'Bố',
+    primary_contact: 'Cha',
     living_with: 'Bố mẹ',
     policy_category: 'Không',
     target_block: 'A00',
@@ -373,21 +430,17 @@ function StudentPortal({ student, onRefreshStudent }: any) {
   const fetchStudentData = async () => {
     if (!student.teacher_id) return;
 
-    // Tải thông báo từ GVCN
     const { data: annData } = await supabase.from('announcements').select('*').eq('teacher_id', student.teacher_id).order('created_date', { ascending: false });
-    if (annData) setAnnouncements(annData);
+    if (annData) setAnnouncements(annData as Announcement[]);
 
-    // Tải khoản thu
     const { data: feeData } = await supabase.from('fee_items').select('*').eq('teacher_id', student.teacher_id);
-    if (feeData) setFeeItems(feeData);
+    if (feeData) setFeeItems(feeData as FeeItem[]);
 
-    // Tải trạng thái đóng tiền
     const { data: payData } = await supabase.from('fee_payments').select('*').eq('student_id', student.id);
-    if (payData) setFeePayments(payData);
+    if (payData) setFeePayments(payData as FeePayment[]);
 
-    // Tải vi phạm & khen thưởng cá nhân
     const { data: recData } = await supabase.from('student_records').select('*').eq('student_id', student.id).order('created_at', { ascending: false });
-    if (recData) setRecords(recData);
+    if (recData) setRecords(recData as StudentRecord[]);
   };
 
   const handleSaveSurvey = async (e: React.FormEvent) => {
@@ -405,9 +458,9 @@ function StudentPortal({ student, onRefreshStudent }: any) {
     }
   };
 
-  // Tính điểm thi đua
-  const totalDeduction = records.filter(r => r.type === 'violation').reduce((sum, r) => sum + Number(r.points), 0);
-  const totalBonus = records.filter(r => r.type === 'commendation').reduce((sum, r) => sum + Number(r.points), 0);
+  // Tính điểm thi đua an toàn
+  const totalDeduction = (records || []).filter(r => r.type === 'violation').reduce((sum, r) => sum + Number(r.points || 0), 0);
+  const totalBonus = (records || []).filter(r => r.type === 'commendation').reduce((sum, r) => sum + Number(r.points || 0), 0);
   const currentTotalScore = 100 - totalDeduction + totalBonus;
 
   return (
@@ -430,9 +483,9 @@ function StudentPortal({ student, onRefreshStudent }: any) {
         </div>
       </div>
 
-      {/* HIỂN THỊ MỤC NỘI QUY ĐIỂM THI ĐỦA (NẾU BẬT) */}
+      {/* MỤC NỘI QUY ĐIỂM THI ĐỦA */}
       {showRules && (
-        <div className="bg-white p-6 rounded-2xl border border-amber-200 shadow-sm space-y-5 animate-fadeIn">
+        <div className="bg-white p-6 rounded-2xl border border-amber-200 shadow-sm space-y-5">
           <div className="border-b pb-3 text-center">
             <h2 className="text-base font-bold text-slate-900 uppercase">BẢNG QUY ĐỊNH VÀ BẢNG ĐIỂM RÈN LUYỆN CHI TIẾT (ÁP DỤNG THPT)</h2>
             <p className="text-slate-500 text-[11px] mt-1">Quỹ điểm ban đầu: <strong>100 điểm / 1 Học kỳ</strong>. Cách quản lý: Trừ điểm phát sinh theo từng tuần.</p>
@@ -610,7 +663,7 @@ function StudentPortal({ student, onRefreshStudent }: any) {
         </div>
       )}
 
-      {/* MỤC 1: ĐIỂM THI ĐỦA THEO TUẦN & TỔNG HỢP LỖI VI PHẠM / KHEN THƯỞNG */}
+      {/* MỤC 1: NHẬT KÝ RÈN LUYỆN */}
       <div className="bg-white p-5 rounded-2xl border shadow-sm space-y-3">
         <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2 border-b pb-2">
           <Award className="w-4.5 h-4.5 text-indigo-600" /> Nhật Ký Rèn Luyện / Điểm Thi Đua Cá Nhân
@@ -619,7 +672,7 @@ function StudentPortal({ student, onRefreshStudent }: any) {
           <p className="text-slate-400 italic">Chưa có ghi nhận vi phạm hoặc khen thưởng nào trong học kỳ.</p>
         ) : (
           <div className="space-y-2">
-            {records.map((r: any) => (
+            {records.map((r: StudentRecord) => (
               <div key={r.id} className={`p-3 rounded-xl border flex justify-between items-center ${r.type === 'violation' ? 'bg-rose-50/60 border-rose-200' : 'bg-emerald-50/60 border-emerald-200'}`}>
                 <div>
                   <span className={`font-bold text-xs ${r.type === 'violation' ? 'text-rose-800' : 'text-emerald-800'}`}>
@@ -656,8 +709,8 @@ function StudentPortal({ student, onRefreshStudent }: any) {
                 </tr>
               </thead>
               <tbody className="divide-y text-slate-700">
-                {feeItems.map((item: any) => {
-                  const pay = feePayments.find((p: any) => p.fee_item_id === item.id);
+                {feeItems.map((item: FeeItem) => {
+                  const pay = feePayments.find((p: FeePayment) => p.fee_item_id === item.id);
                   const isPaid = pay?.is_paid || false;
                   return (
                     <tr key={item.id} className="hover:bg-slate-50">
@@ -693,7 +746,7 @@ function StudentPortal({ student, onRefreshStudent }: any) {
           <p className="text-slate-400 italic">Chưa có thông báo nào từ Giáo viên.</p>
         ) : (
           <div className="space-y-3">
-            {announcements.map((a: any) => (
+            {announcements.map((a: Announcement) => (
               <div key={a.id} className={`p-3.5 rounded-xl border ${a.important ? 'bg-amber-50/60 border-amber-200' : 'bg-slate-50 border-slate-200'} space-y-1`}>
                 <div className="flex justify-between items-center">
                   <span className="font-bold text-slate-800 text-xs flex items-center gap-1">
@@ -712,8 +765,8 @@ function StudentPortal({ student, onRefreshStudent }: any) {
 }
 
 // ==================== 4. CỔNG BÁO CÁO DÀNH CHO LỚP TRƯỞNG ====================
-function ClassLeaderPortal({ student, onSwitchToStudentView }: any) {
-  const [classStudents, setClassStudents] = useState<any[]>([]);
+function ClassLeaderPortal({ student, onSwitchToStudentView }: { student: Student; onSwitchToStudentView: () => void }) {
+  const [classStudents, setClassStudents] = useState<Student[]>([]);
   const [weekNumber, setWeekNumber] = useState<number>(1);
   const [selectedStudentId, setSelectedStudentId] = useState('');
   const [recordType, setRecordType] = useState<'violation' | 'commendation'>('violation');
@@ -730,7 +783,7 @@ function ClassLeaderPortal({ student, onSwitchToStudentView }: any) {
   const fetchClassData = async () => {
     if (!student.teacher_id) return;
     const { data } = await supabase.from('students').select('*').eq('teacher_id', student.teacher_id);
-    if (data) setClassStudents(data);
+    if (data) setClassStudents(data as Student[]);
   };
 
   const handleAddIndividualRecord = async (e: React.FormEvent) => {
@@ -765,7 +818,8 @@ function ClassLeaderPortal({ student, onSwitchToStudentView }: any) {
         teacher_id: student.teacher_id,
         title: `[THI ĐỦA LỚP TUẦN ${weekNumber}]`,
         content: summaryText,
-        important: true
+        important: true,
+        created_date: new Date().toISOString().slice(0, 10)
       }
     ]);
 
@@ -791,7 +845,7 @@ function ClassLeaderPortal({ student, onSwitchToStudentView }: any) {
         {/* PHẦN NHẬP VI PHẠM / KHEN THƯỞNG CÁ NHÂN */}
         <div className="bg-white p-5 rounded-2xl border shadow-sm space-y-4">
           <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2 border-b pb-2">
-            <ShieldAlert className="w-4 h-4 text-indigo-600" /> 4. Báo Cáo Vi Phạm / Khen Thưởng Cá Nhân
+            <ShieldAlert className="w-4 h-4 text-indigo-600" /> Báo Cáo Vi Phạm / Khen Thưởng Cá Nhân
           </h2>
           <form onSubmit={handleAddIndividualRecord} className="space-y-3">
             <div>
@@ -802,7 +856,7 @@ function ClassLeaderPortal({ student, onSwitchToStudentView }: any) {
               <label className="font-semibold block mb-1">Chọn Học Sinh Trong Lớp:</label>
               <select value={selectedStudentId} onChange={e => setSelectedStudentId(e.target.value)} className="w-full p-2 border rounded-xl" required>
                 <option value="">-- Chọn Học Sinh --</option>
-                {classStudents.map((s: any) => (
+                {classStudents.map((s: Student) => (
                   <option key={s.id} value={s.id}>{s.full_name} (Tổ {s.group_number || 1}) - {s.code}</option>
                 ))}
               </select>
@@ -867,26 +921,23 @@ function ClassLeaderPortal({ student, onSwitchToStudentView }: any) {
 }
 
 // ==================== 5. BẢNG ĐIỀU KHIỂN GIÁO VIÊN CHỦ NHIỆM ====================
-function TeacherDashboard({ teacher }: any) {
+function TeacherDashboard({ teacher }: { teacher: Teacher }) {
   const [activeTab, setActiveTab] = useState<'students' | 'fees' | 'announcements'>('students');
-  const [students, setStudents] = useState<any[]>([]);
-  const [feeItems, setFeeItems] = useState<any[]>([]);
-  const [announcements, setAnnouncements] = useState<any[]>([]);
-  const [selectedStudentForModal, setSelectedStudentForModal] = useState<any | null>(null);
+  const [students, setStudents] = useState<Student[]>([]);
+  const [feeItems, setFeeItems] = useState<FeeItem[]>([]);
+  const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+  const [selectedStudentForModal, setSelectedStudentForModal] = useState<Student | null>(null);
 
-  // Form Thêm học sinh
   const [newStudentCode, setNewStudentCode] = useState('');
   const [newStudentName, setNewStudentName] = useState('');
   const [newStudentDob, setNewStudentDob] = useState('');
   const [newStudentRole, setNewStudentRole] = useState('Học sinh');
   const [newStudentGroup, setNewStudentGroup] = useState(1);
 
-  // Form Thêm Khoản thu
   const [feeTitle, setFeeTitle] = useState('');
   const [feeAmount, setFeeAmount] = useState('');
   const [feeDeadline, setFeeDeadline] = useState('');
 
-  // Form Thêm Thông báo
   const [annTitle, setAnnTitle] = useState('');
   const [annContent, setAnnContent] = useState('');
   const [annImportant, setAnnImportant] = useState(false);
@@ -896,17 +947,14 @@ function TeacherDashboard({ teacher }: any) {
   }, [teacher]);
 
   const fetchData = async () => {
-    // 1. Tải Học sinh của đúng giáo viên này
     const { data: stData } = await supabase.from('students').select('*').eq('teacher_id', teacher.id).order('code', { ascending: true });
-    if (stData) setStudents(stData);
+    if (stData) setStudents(stData as Student[]);
 
-    // 2. Tải Khoản thu
     const { data: fData } = await supabase.from('fee_items').select('*').eq('teacher_id', teacher.id);
-    if (fData) setFeeItems(fData);
+    if (fData) setFeeItems(fData as FeeItem[]);
 
-    // 3. Tải Thông báo
     const { data: aData } = await supabase.from('announcements').select('*').eq('teacher_id', teacher.id).order('created_date', { ascending: false });
-    if (aData) setAnnouncements(aData);
+    if (aData) setAnnouncements(aData as Announcement[]);
   };
 
   const handleAddStudent = async (e: React.FormEvent) => {
@@ -972,7 +1020,6 @@ function TeacherDashboard({ teacher }: any) {
         </div>
       </div>
 
-      {/* TAB 1: DANH SÁCH HỌC SINH (HIỂN THỊ ĐẦY ĐỦ THÔNG TIN KHẢO SÁT, MSHS, NGÀY SINH) */}
       {activeTab === 'students' && (
         <div className="space-y-6">
           <div className="bg-white p-5 rounded-2xl border shadow-sm">
@@ -1005,7 +1052,7 @@ function TeacherDashboard({ teacher }: any) {
                 </tr>
               </thead>
               <tbody className="divide-y text-slate-700">
-                {students.map((s: any) => (
+                {students.map((s: Student) => (
                   <tr key={s.id} className="hover:bg-slate-50">
                     <td className="p-3 border-r font-mono font-bold text-indigo-700">{s.code}</td>
                     <td className="p-3 border-r font-bold">{s.full_name}</td>
@@ -1033,13 +1080,12 @@ function TeacherDashboard({ teacher }: any) {
         </div>
       )}
 
-      {/* TAB 2: QUẢN LÝ KHOẢN THU */}
       {activeTab === 'fees' && (
         <div className="space-y-6">
           <div className="bg-white p-5 rounded-2xl border shadow-sm">
             <h2 className="font-bold text-slate-800 text-sm mb-3">Tạo Khoản Thu / Quỹ Lớp Mới</h2>
             <form onSubmit={handleAddFeeItem} className="grid grid-cols-1 md:grid-cols-4 gap-3">
-              <input type="text" required placeholder="Tên khoản thu (VD: Quỹ lớp HK1)" value={feeTitle} onChange={e => setFeeTitle(e.target.value)} className="p-2 border rounded-xl" />
+              <input type="text" required placeholder="Tên khoản thu" value={feeTitle} onChange={e => setFeeTitle(e.target.value)} className="p-2 border rounded-xl" />
               <input type="number" required placeholder="Số tiền (VNĐ)" value={feeAmount} onChange={e => setFeeAmount(e.target.value)} className="p-2 border rounded-xl" />
               <input type="date" value={feeDeadline} onChange={e => setFeeDeadline(e.target.value)} className="p-2 border rounded-xl" />
               <button type="submit" className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow">Tạo Khoản Thu</button>
@@ -1056,7 +1102,7 @@ function TeacherDashboard({ teacher }: any) {
                 </tr>
               </thead>
               <tbody className="divide-y text-slate-700">
-                {feeItems.map((f: any) => (
+                {feeItems.map((f: FeeItem) => (
                   <tr key={f.id} className="hover:bg-slate-50">
                     <td className="p-3 border-r font-bold">{f.title}</td>
                     <td className="p-3 border-r text-right font-bold text-indigo-700">{Number(f.amount).toLocaleString()} VNĐ</td>
@@ -1069,7 +1115,6 @@ function TeacherDashboard({ teacher }: any) {
         </div>
       )}
 
-      {/* TAB 3: THÔNG BÁO & DẶN DÒ */}
       {activeTab === 'announcements' && (
         <div className="space-y-6">
           <div className="bg-white p-5 rounded-2xl border shadow-sm">
@@ -1086,7 +1131,7 @@ function TeacherDashboard({ teacher }: any) {
           </div>
 
           <div className="space-y-3">
-            {announcements.map((a: any) => (
+            {announcements.map((a: Announcement) => (
               <div key={a.id} className="bg-white p-4 rounded-2xl border shadow-sm space-y-1">
                 <div className="flex justify-between items-center">
                   <span className="font-bold text-sm text-slate-800">{a.title}</span>
@@ -1099,7 +1144,7 @@ function TeacherDashboard({ teacher }: any) {
         </div>
       )}
 
-      {/* MODAL HIỂN THỊ ĐẦY ĐỦ BẢNG THÔNG TIN ĐIỀU TRA HỌC SINH */}
+      {/* MODAL HIỂN THỊ ĐẦY ĐỦ BẢNG THÔNG TIN ĐIỀU TRA HỌC SINH (SỬA LỖI ACCESSIBILITY NULL CHUẨN) */}
       {selectedStudentForModal && (
         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-white max-w-3xl w-full max-h-[90vh] overflow-y-auto rounded-2xl shadow-2xl p-6 space-y-4 text-xs">
@@ -1114,32 +1159,32 @@ function TeacherDashboard({ teacher }: any) {
               <div className="space-y-4 leading-relaxed text-slate-700">
                 <div className="bg-slate-50 p-3 rounded-xl space-y-1">
                   <h3 className="font-bold text-indigo-800 uppercase">1. Thông tin học sinh & Gia đình</h3>
-                  <p>• <strong>Nơi sinh:</strong> {selectedStudentForModal.survey_info.p_pob}</p>
-                  <p>• <strong>Địa chỉ hiện tại:</strong> {selectedStudentForModal.survey_info.p_address}</p>
-                  <p>• <strong>Thông tin Cha:</strong> {selectedStudentForModal.survey_info.father_name}</p>
-                  <p>• <strong>Thông tin Mẹ:</strong> {selectedStudentForModal.survey_info.mother_name}</p>
-                  <p>• <strong>Người liên lạc chính:</strong> {selectedStudentForModal.survey_info.primary_contact}</p>
-                  <p>• <strong>Đang sống cùng:</strong> {selectedStudentForModal.survey_info.living_with}</p>
+                  <p>• <strong>Nơi sinh:</strong> {selectedStudentForModal.survey_info.p_pob || 'Không rõ'}</p>
+                  <p>• <strong>Địa chỉ hiện tại:</strong> {selectedStudentForModal.survey_info.p_address || 'Không rõ'}</p>
+                  <p>• <strong>Thông tin Cha:</strong> {selectedStudentForModal.survey_info.father_name || 'Không rõ'}</p>
+                  <p>• <strong>Thông tin Mẹ:</strong> {selectedStudentForModal.survey_info.mother_name || 'Không rõ'}</p>
+                  <p>• <strong>Người liên lạc chính:</strong> {selectedStudentForModal.survey_info.primary_contact || 'Cha'}</p>
+                  <p>• <strong>Đang sống cùng:</strong> {selectedStudentForModal.survey_info.living_with || 'Không rõ'}</p>
                 </div>
 
                 <div className="bg-slate-50 p-3 rounded-xl space-y-1">
                   <h3 className="font-bold text-indigo-800 uppercase">2. Định hướng & Mục tiêu</h3>
-                  <p>• <strong>Khối thi dự định:</strong> {selectedStudentForModal.survey_info.target_block}</p>
-                  <p>• <strong>Mục tiêu lớp 10:</strong> {selectedStudentForModal.survey_info.target_title}</p>
-                  <p>• <strong>Mục tiêu môn yếu nhất:</strong> {selectedStudentForModal.survey_info.target_weak_subject}</p>
+                  <p>• <strong>Khối thi dự định:</strong> {selectedStudentForModal.survey_info.target_block || 'A00'}</p>
+                  <p>• <strong>Mục tiêu lớp 10:</strong> {selectedStudentForModal.survey_info.target_title || 'Học sinh Giỏi'}</p>
+                  <p>• <strong>Mục tiêu môn yếu nhất:</strong> {selectedStudentForModal.survey_info.target_weak_subject || 'Đạt trên 6.5'}</p>
                 </div>
 
                 <div className="bg-slate-50 p-3 rounded-xl space-y-1">
                   <h3 className="font-bold text-indigo-800 uppercase">3. Sức khỏe, Kỹ năng & Cán sự</h3>
-                  <p>• <strong>Sức khỏe / Ưu tiên chỗ ngồi:</strong> {selectedStudentForModal.survey_info.health_notes}</p>
-                  <p>• <strong>Năng khiếu / Chứng chỉ:</strong> {selectedStudentForModal.survey_info.talents}</p>
-                  <p>• <strong>Kinh nghiệm cán sự cấp 2:</strong> {selectedStudentForModal.survey_info.past_roles}</p>
-                  <p>• <strong>Nguyện vọng Ban cán sự:</strong> {selectedStudentForModal.survey_info.desired_role}</p>
+                  <p>• <strong>Sức khỏe / Ưu tiên chỗ ngồi:</strong> {selectedStudentForModal.survey_info.health_notes || 'Bình thường'}</p>
+                  <p>• <strong>Năng khiếu / Chứng chỉ:</strong> {selectedStudentForModal.survey_info.talents || 'Không có'}</p>
+                  <p>• <strong>Kinh nghiệm cán sự cấp 2:</strong> {selectedStudentForModal.survey_info.past_roles || 'Không có'}</p>
+                  <p>• <strong>Nguyện vọng Ban cán sự:</strong> {selectedStudentForModal.survey_info.desired_role || 'Không'}</p>
                 </div>
 
                 <div className="bg-slate-50 p-3 rounded-xl space-y-1">
                   <h3 className="font-bold text-indigo-800 uppercase">4. Tâm tư, Nguyện vọng & Thông điệp bí mật</h3>
-                  <p>• <strong>Mong muốn ở GVCN:</strong> {selectedStudentForModal.survey_info.teacher_expectations}</p>
+                  <p>• <strong>Mong muốn ở GVCN:</strong> {selectedStudentForModal.survey_info.teacher_expectations || 'Không có'}</p>
                   <p className="text-rose-700 bg-rose-50 p-2 rounded-lg font-medium">
                     🔒 <strong>Thông điệp bí mật:</strong> {selectedStudentForModal.survey_info.secret_message || 'Không có'}
                   </p>
@@ -1155,10 +1200,8 @@ function TeacherDashboard({ teacher }: any) {
   );
 }
 
-// ==================== 6. BẢNG QUẢN TRỊ ADMIN (DUYỆT & CẤP LẠI PASS) ====================
-function AdminDashboard({ teachers, onRefresh }: any) {
-  const [loading, setLoading] = useState(false);
-
+// ==================== 6. BẢNG QUẢN TRỊ ADMIN ====================
+function AdminDashboard({ teachers, onRefresh }: { teachers: Teacher[]; onRefresh: () => void }) {
   const handleApprove = async (id: string) => {
     const { error } = await supabase.from('teachers').update({ is_approved: true }).eq('id', id);
     if (!error) { await onRefresh(); alert('Đã duyệt kích hoạt tài khoản!'); }
@@ -1203,7 +1246,7 @@ function AdminDashboard({ teachers, onRefresh }: any) {
             </tr>
           </thead>
           <tbody className="divide-y text-slate-700">
-            {teachers.map((t: any) => (
+            {teachers.map((t: Teacher) => (
               <tr key={t.id} className="hover:bg-slate-50">
                 <td className="p-3 border-r font-bold">{t.full_name} ({t.school || 'THPT'})</td>
                 <td className="p-3 border-r text-indigo-700 font-semibold">{t.email}</td>
@@ -1234,7 +1277,7 @@ function AdminDashboard({ teachers, onRefresh }: any) {
 }
 
 // ==================== 7. CẤP LẠI MẬT KHẨU QUA EMAILJS ====================
-function ForgotPasswordScreen({ onBackToLogin }: any) {
+function ForgotPasswordScreen({ onBackToLogin }: { onBackToLogin: () => void }) {
   const [email, setEmail] = useState('');
   const [otpSent, setOtpSent] = useState(false);
   const [generatedOtp, setGeneratedOtp] = useState('');

@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import * as XLSX from 'xlsx';
 import {
   Users, Wallet, CheckCircle, XCircle, Trash2, Award, LogOut,
   ShieldAlert, Trophy, Bell, AlertCircle, RefreshCw, BookOpen, FileText
@@ -918,11 +919,17 @@ function ClassLeaderPortal({ student, onSwitchToStudentView }: { student: Studen
 
 // ==================== 5. BẢNG ĐIỀU KHIỂN GIÁO VIÊN CHỦ NHIỆM ====================
 function TeacherDashboard({ teacher }: { teacher: Teacher }) {
-  const [activeTab, setActiveTab] = useState<'students' | 'fees' | 'announcements'>('students');
+  const [activeTab, setActiveTab] = useState<'students' | 'fees' | 'announcements' | 'reports'>('students');
   const [students, setStudents] = useState<Student[]>([]);
   const [feeItems, setFeeItems] = useState<FeeItem[]>([]);
+  const [feePayments, setFeePayments] = useState<FeePayment[]>([]);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+  const [studentRecords, setStudentRecords] = useState<StudentRecord[]>([]);
   const [selectedStudentForModal, setSelectedStudentForModal] = useState<Student | null>(null);
+  const [selectedWeek, setSelectedWeek] = useState<string>('all');
+  const [selectedFeeForUnpaid, setSelectedFeeForUnpaid] = useState<string>('');
+  const [importing, setImporting] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [newStudentCode, setNewStudentCode] = useState('');
   const [newStudentName, setNewStudentName] = useState('');
@@ -951,6 +958,16 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
 
     const { data: aData } = await supabase.from('announcements').select('*').eq('teacher_id', teacher.id).order('created_date', { ascending: false });
     if (aData) setAnnouncements(aData as Announcement[]);
+
+    const { data: rData } = await supabase.from('student_records').select('*').eq('teacher_id', teacher.id).order('week_number', { ascending: false });
+    if (rData) setStudentRecords(rData as StudentRecord[]);
+
+    if (fData && fData.length > 0) {
+      const { data: pData } = await supabase.from('fee_payments').select('*').in('fee_item_id', fData.map((f: any) => f.id));
+      if (pData) setFeePayments(pData as FeePayment[]);
+    } else {
+      setFeePayments([]);
+    }
   };
 
   const handleAddStudent = async (e: React.FormEvent) => {
@@ -971,6 +988,113 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
       setNewStudentCode(''); setNewStudentName(''); setNewStudentDob('');
       fetchData();
     }
+  };
+
+  const handleImportExcel = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImporting(true);
+    try {
+      const buf = await file.arrayBuffer();
+      const workbook = XLSX.read(buf, { cellDates: true });
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      const rows: any[] = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+
+      const mapped = rows.map((r) => {
+        let dob = r['Ngày sinh'] || r['DOB'] || '';
+        if (dob instanceof Date) dob = dob.toISOString().slice(0, 10);
+        return {
+          teacher_id: teacher.id,
+          code: String(r['MSHS'] || r['Mã số'] || '').trim().toUpperCase(),
+          full_name: String(r['Họ và tên'] || r['Họ tên'] || '').trim(),
+          dob: dob || null,
+          class_role: String(r['Chức vụ'] || 'Học sinh').trim() || 'Học sinh',
+          group_number: Number(r['Tổ'] || r['Nhóm'] || 1) || 1,
+        };
+      }).filter(r => r.code && r.full_name);
+
+      if (mapped.length === 0) {
+        alert('Không đọc được dữ liệu. Kiểm tra file có đúng cột: MSHS, Họ và tên, Ngày sinh, Chức vụ, Tổ không.');
+        setImporting(false);
+        return;
+      }
+
+      const { error } = await supabase.from('students').upsert(mapped, { onConflict: 'code' });
+      if (error) alert('Lỗi khi nhập danh sách: ' + error.message);
+      else {
+        alert(`Đã nhập thành công ${mapped.length} học sinh!`);
+        fetchData();
+      }
+    } catch (err: any) {
+      alert('Lỗi đọc file Excel: ' + err.message);
+    } finally {
+      setImporting(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const handleExportStudents = () => {
+    const data = students.map(s => ({
+      'MSHS': s.code,
+      'Họ và tên': s.full_name,
+      'Ngày sinh': s.dob || '',
+      'Chức vụ': s.class_role || 'Học sinh',
+      'Tổ': s.group_number || 1,
+      'Đã khảo sát': s.survey_completed ? 'Có' : 'Chưa',
+    }));
+    const ws = XLSX.utils.json_to_sheet(data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'DanhSachHS');
+    XLSX.writeFile(wb, `DanhSachHocSinh.xlsx`);
+  };
+
+  const handleExportFees = () => {
+    const data: any[] = [];
+    students.forEach(s => {
+      feeItems.forEach(f => {
+        const pay = feePayments.find(p => p.student_id === s.id && p.fee_item_id === f.id);
+        data.push({
+          'MSHS': s.code,
+          'Họ và tên': s.full_name,
+          'Khoản thu': f.title,
+          'Số tiền': f.amount,
+          'Trạng thái': pay?.is_paid ? 'Đã nộp' : 'Chưa nộp',
+        });
+      });
+    });
+    const ws = XLSX.utils.json_to_sheet(data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'KhoanThu');
+    XLSX.writeFile(wb, `KhoanThu.xlsx`);
+  };
+
+  const handleExportRecords = () => {
+    const data = studentRecords.map(r => {
+      const st = students.find(s => s.id === r.student_id);
+      return {
+        'Tuần': r.week_number,
+        'MSHS': st?.code || '',
+        'Họ và tên': st?.full_name || '',
+        'Tổ': st?.group_number || '',
+        'Loại': r.type === 'violation' ? 'Vi phạm' : 'Khen thưởng',
+        'Nội dung': r.content,
+        'Điểm': r.points,
+        'Ngày ghi nhận': r.created_at ? r.created_at.slice(0, 10) : '',
+      };
+    });
+    const ws = XLSX.utils.json_to_sheet(data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'ViPham_KhenThuong');
+    XLSX.writeFile(wb, `NhatKyRenLuyen.xlsx`);
+  };
+
+  const handleToggleFeePayment = async (studentId: string, feeItemId: string, currentStatus: boolean) => {
+    const { error } = await supabase.from('fee_payments').upsert(
+      { student_id: studentId, fee_item_id: feeItemId, is_paid: !currentStatus },
+      { onConflict: 'student_id,fee_item_id' }
+    );
+    if (error) alert('Lỗi: ' + error.message);
+    else fetchData();
   };
 
   const handleAddFeeItem = async (e: React.FormEvent) => {
@@ -1013,17 +1137,32 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
           <h1 className="text-xl font-bold text-slate-800">Bảng Quản Lý Lớp Chủ Nhiệm - {teacher.full_name}</h1>
           <p className="text-slate-500 mt-0.5">Trường: {teacher.school || 'THPT'} | Quản lý riêng danh sách học sinh</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           <button onClick={() => setActiveTab('students')} className={`px-4 py-2 rounded-xl font-bold transition ${activeTab === 'students' ? 'bg-indigo-600 text-white shadow' : 'bg-slate-100'}`}>👨‍🎓 Danh Sách Học Sinh</button>
           <button onClick={() => setActiveTab('fees')} className={`px-4 py-2 rounded-xl font-bold transition ${activeTab === 'fees' ? 'bg-indigo-600 text-white shadow' : 'bg-slate-100'}`}>💰 Quản Lý Khoản Thu</button>
+          <button onClick={() => setActiveTab('reports')} className={`px-4 py-2 rounded-xl font-bold transition ${activeTab === 'reports' ? 'bg-indigo-600 text-white shadow' : 'bg-slate-100'}`}>📊 Thi Đua & Báo Cáo</button>
           <button onClick={() => setActiveTab('announcements')} className={`px-4 py-2 rounded-xl font-bold transition ${activeTab === 'announcements' ? 'bg-indigo-600 text-white shadow' : 'bg-slate-100'}`}>📢 Thông Báo & Dặn Dò</button>
         </div>
       </div>
 
       {activeTab === 'students' && (
         <div className="space-y-6">
+          <div className="bg-white p-5 rounded-2xl border shadow-sm flex justify-between items-center flex-wrap gap-3">
+            <div>
+              <h2 className="font-bold text-slate-800 text-sm">Nhập / Xuất Danh Sách Từ Excel</h2>
+              <p className="text-slate-500 text-[11px] mt-1">File Excel cần có cột: MSHS, Họ và tên, Ngày sinh, Chức vụ, Tổ. Nhập lại mã đã có sẽ tự động cập nhật.</p>
+            </div>
+            <div className="flex gap-2">
+              <input ref={fileInputRef} type="file" accept=".xlsx,.xls" onChange={handleImportExcel} className="hidden" id="excel-import" />
+              <label htmlFor="excel-import" className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl font-bold cursor-pointer shadow">
+                {importing ? 'Đang nhập...' : '📤 Nhập Từ Excel'}
+              </label>
+              <button onClick={handleExportStudents} className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl font-bold shadow">📥 Xuất Excel</button>
+            </div>
+          </div>
+
           <div className="bg-white p-5 rounded-2xl border shadow-sm">
-            <h2 className="font-bold text-slate-800 text-sm mb-3">Thêm Học Sinh Mới Vào Lớp</h2>
+            <h2 className="font-bold text-slate-800 text-sm mb-3">Thêm Học Sinh Mới Vào Lớp (thủ công)</h2>
             <form onSubmit={handleAddStudent} className="grid grid-cols-1 md:grid-cols-6 gap-3">
               <input type="text" required placeholder="MSHS (VD: HS001)" value={newStudentCode} onChange={e => setNewStudentCode(e.target.value)} className="p-2 border rounded-xl uppercase font-mono" />
               <input type="text" required placeholder="Họ và tên" value={newStudentName} onChange={e => setNewStudentName(e.target.value)} className="p-2 border rounded-xl" />
@@ -1115,6 +1254,146 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
         </div>
       )}
 
+      {activeTab === 'reports' && (
+        <div className="space-y-6">
+          <div className="bg-white p-5 rounded-2xl border shadow-sm space-y-3">
+            <div className="flex justify-between items-center flex-wrap gap-3">
+              <h2 className="font-bold text-slate-800 text-sm">Nhật Ký Vi Phạm / Khen Thưởng Toàn Lớp (Lớp trưởng nộp)</h2>
+              <div className="flex gap-2 items-center">
+                <select value={selectedWeek} onChange={e => setSelectedWeek(e.target.value)} className="p-2 border rounded-xl">
+                  <option value="all">Tất cả các tuần</option>
+                  {[...new Set(studentRecords.map(r => r.week_number))].sort((a, b) => a - b).map(w => (
+                    <option key={w} value={String(w)}>Tuần {w}</option>
+                  ))}
+                </select>
+                <button onClick={handleExportRecords} className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-2 rounded-xl font-bold">📥 Xuất Excel</button>
+              </div>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead className="bg-slate-50 font-bold border-b text-slate-700">
+                  <tr>
+                    <th className="p-2 border-r">Tuần</th>
+                    <th className="p-2 border-r">MSHS</th>
+                    <th className="p-2 border-r">Họ Tên</th>
+                    <th className="p-2 border-r text-center">Tổ</th>
+                    <th className="p-2 border-r">Loại</th>
+                    <th className="p-2 border-r">Nội dung</th>
+                    <th className="p-2 border-r text-center">Điểm</th>
+                    <th className="p-2 text-center">Ngày</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {studentRecords
+                    .filter(r => selectedWeek === 'all' || String(r.week_number) === selectedWeek)
+                    .map(r => {
+                      const st = students.find(s => s.id === r.student_id);
+                      return (
+                        <tr key={r.id} className="hover:bg-slate-50">
+                          <td className="p-2 border-r text-center font-bold">{r.week_number}</td>
+                          <td className="p-2 border-r font-mono">{st?.code}</td>
+                          <td className="p-2 border-r font-semibold">{st?.full_name}</td>
+                          <td className="p-2 border-r text-center">{st?.group_number || 1}</td>
+                          <td className={`p-2 border-r font-bold ${r.type === 'violation' ? 'text-rose-600' : 'text-emerald-600'}`}>
+                            {r.type === 'violation' ? 'Vi phạm' : 'Khen thưởng'}
+                          </td>
+                          <td className="p-2 border-r">{r.content}</td>
+                          <td className={`p-2 border-r text-center font-bold ${r.type === 'violation' ? 'text-rose-600' : 'text-emerald-600'}`}>
+                            {r.type === 'violation' ? `-${r.points}` : `+${r.points}`}
+                          </td>
+                          <td className="p-2 text-center text-slate-400">{r.created_at?.slice(0, 10)}</td>
+                        </tr>
+                      );
+                    })}
+                </tbody>
+              </table>
+              {studentRecords.length === 0 && <p className="text-slate-400 italic p-3">Chưa có ghi nhận nào từ Lớp trưởng.</p>}
+            </div>
+          </div>
+
+          <div className="bg-white p-5 rounded-2xl border shadow-sm space-y-3">
+            <h2 className="font-bold text-slate-800 text-sm">Bảng Điểm Rèn Luyện Tổng Hợp (Bảng Kiểm Điểm)</h2>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead className="bg-slate-50 font-bold border-b text-slate-700">
+                  <tr>
+                    <th className="p-2 border-r">MSHS</th>
+                    <th className="p-2 border-r">Họ Tên</th>
+                    <th className="p-2 border-r text-center">Tổ</th>
+                    <th className="p-2 border-r text-center">Tổng Trừ</th>
+                    <th className="p-2 border-r text-center">Tổng Cộng</th>
+                    <th className="p-2 text-center">Điểm Hiện Tại</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {students.map(s => {
+                    const recs = studentRecords.filter(r => r.student_id === s.id);
+                    const ded = recs.filter(r => r.type === 'violation').reduce((sum, r) => sum + Number(r.points), 0);
+                    const bonus = recs.filter(r => r.type === 'commendation').reduce((sum, r) => sum + Number(r.points), 0);
+                    return (
+                      <tr key={s.id} className="hover:bg-slate-50">
+                        <td className="p-2 border-r font-mono">{s.code}</td>
+                        <td className="p-2 border-r font-semibold">{s.full_name}</td>
+                        <td className="p-2 border-r text-center">{s.group_number || 1}</td>
+                        <td className="p-2 border-r text-center text-rose-600 font-bold">-{ded}</td>
+                        <td className="p-2 border-r text-center text-emerald-600 font-bold">+{bonus}</td>
+                        <td className="p-2 text-center font-black text-indigo-700">{100 - ded + bonus}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="bg-white p-5 rounded-2xl border shadow-sm space-y-3">
+            <div className="flex justify-between items-center flex-wrap gap-3">
+              <h2 className="font-bold text-slate-800 text-sm">Danh Sách Chưa Nộp Khoản Thu</h2>
+              <div className="flex gap-2 items-center">
+                <select value={selectedFeeForUnpaid} onChange={e => setSelectedFeeForUnpaid(e.target.value)} className="p-2 border rounded-xl">
+                  <option value="">-- Chọn khoản thu --</option>
+                  {feeItems.map(f => <option key={f.id} value={f.id}>{f.title}</option>)}
+                </select>
+                <button onClick={handleExportFees} className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-2 rounded-xl font-bold">📥 Xuất Excel Toàn Bộ</button>
+              </div>
+            </div>
+            {selectedFeeForUnpaid ? (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead className="bg-rose-50 font-bold border-b text-rose-800">
+                    <tr>
+                      <th className="p-2 border-r">MSHS</th>
+                      <th className="p-2 border-r">Họ Tên</th>
+                      <th className="p-2 text-center">Trạng thái</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {students.map(s => {
+                      const pay = feePayments.find(p => p.student_id === s.id && p.fee_item_id === selectedFeeForUnpaid);
+                      const isPaid = pay?.is_paid || false;
+                      return (
+                        <tr key={s.id} className="hover:bg-slate-50">
+                          <td className="p-2 border-r font-mono">{s.code}</td>
+                          <td className="p-2 border-r font-semibold">{s.full_name}</td>
+                          <td className="p-2 text-center">
+                            <button onClick={() => handleToggleFeePayment(s.id, selectedFeeForUnpaid, isPaid)}
+                              className={`px-3 py-1 rounded-full font-bold ${isPaid ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
+                              {isPaid ? '✓ Đã nộp (bấm để huỷ)' : '✗ Chưa nộp (bấm để đánh dấu)'}
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <p className="text-slate-400 italic">Chọn 1 khoản thu ở trên để xem và cập nhật trạng thái từng học sinh.</p>
+            )}
+          </div>
+        </div>
+      )}
+
       {activeTab === 'announcements' && (
         <div className="space-y-6">
           <div className="bg-white p-5 rounded-2xl border shadow-sm">
@@ -1198,7 +1477,6 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
     </div>
   );
 }
-
 // ==================== 6. BẢNG QUẢN TRỊ ADMIN ====================
 function AdminDashboard({ teachers, onRefresh }: { teachers: Teacher[]; onRefresh: () => void }) {
   const handleApprove = async (id: string) => {

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import * as XLSX from 'xlsx';
 import {
   Users, Wallet, CheckCircle, XCircle, Trash2, Award, LogOut,
-  ShieldAlert, Trophy, Bell, AlertCircle, RefreshCw, BookOpen, FileText, Calendar
+  ShieldAlert, Trophy, Bell, AlertCircle, RefreshCw, BookOpen, FileText
 } from 'lucide-react';
 import { supabase } from './supabaseClient';
 
@@ -182,7 +182,7 @@ export default function App() {
   );
 }
 
-// ==================== 1. MÀN HÌNH ĐĂNG NHẬP (CÓ CHỌN GV CỦA HỌC SINH) ====================
+// ==================== 1. MÀN HÌNH ĐĂNG NHẬP ====================
 function LoginScreen({ teachers, onTeacherLogin, onStudentLogin, onAdminLogin, onForgotPassword, onRegister }: any) {
   const [role, setRole] = useState<'teacher' | 'student' | 'admin'>('teacher');
   const [email, setEmail] = useState('');
@@ -243,44 +243,42 @@ function LoginScreen({ teachers, onTeacherLogin, onStudentLogin, onAdminLogin, o
       return;
     }
 
-   if (role === 'student') {
-  if (!selectedTeacherId) {
-    setLoading(false);
-    setError('Vui lòng chọn Lớp/Giáo viên chủ nhiệm của em!');
-    return;
-  }
+    if (role === 'student') {
+      if (!selectedTeacherId) {
+        setLoading(false);
+        setError('Vui lòng chọn Lớp/Giáo viên chủ nhiệm của em!');
+        return;
+      }
 
-  const inputCode = studentCode.trim().toUpperCase();
+      const inputCode = studentCode.trim().toUpperCase();
 
-  // BƯỚC 1: Tìm học sinh theo đúng teacher_id đã chọn
-  let { data, error: stErr } = await supabase
-    .from('students')
-    .select('*')
-    .eq('teacher_id', selectedTeacherId)
-    .eq('code', inputCode);
+      let { data, error: stErr } = await supabase
+        .from('students')
+        .select('*')
+        .eq('teacher_id', selectedTeacherId)
+        .eq('code', inputCode);
 
-  // BƯỚC 2: Dự phòng - Nếu ID giáo viên bị lệch do tài khoản cũ, tìm theo MSHS trên toàn hệ thống
-  if (!data || data.length === 0) {
-    const { data: fallbackData } = await supabase
-      .from('students')
-      .select('*')
-      .eq('code', inputCode);
-      
-    if (fallbackData && fallbackData.length > 0) {
-      data = fallbackData;
+      if (!data || data.length === 0) {
+        const { data: fallbackData } = await supabase
+          .from('students')
+          .select('*')
+          .eq('code', inputCode);
+          
+        if (fallbackData && fallbackData.length > 0) {
+          data = fallbackData;
+        }
+      }
+
+      setLoading(false);
+
+      if (!data || data.length === 0) {
+        setError('Mã số MSHS không tồn tại trên hệ thống!');
+      } else {
+        const matchedStudent = data.find((s: any) => s.teacher_id === selectedTeacherId) || data[0];
+        onStudentLogin(matchedStudent as Student);
+      }
     }
-  }
-
-  setLoading(false);
-
-  if (!data || data.length === 0) {
-    setError('Mã số MSHS không tồn tại trên hệ thống!');
-  } else {
-    // Nếu tìm thấy nhiều học sinh trùng mã HS001 ở các lớp khác nhau, chọn đúng học sinh thuộc lớp đã chọn
-    const matchedStudent = data.find((s: any) => s.teacher_id === selectedTeacherId) || data[0];
-    onStudentLogin(matchedStudent as Student);
-  }
-}
+  };
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4">
@@ -725,7 +723,7 @@ function StudentPortal({ student, onRefreshStudent }: { student: Student; onRefr
                     <span className={`font-bold text-xs ${r.type === 'violation' ? 'text-rose-800' : 'text-emerald-800'}`}>
                       {r.type === 'violation' ? '⚠️ Vi Phạm' : '🌟 Khen Thưởng'} - Tuần {r.week_number}
                     </span>
-                    {r.record_date && <span className="text-[11px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded font-mono">📅 Ngày vi phạm: {r.record_date}</span>}
+                    {r.record_date && <span className="text-[11px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded font-mono">📅 Ngày: {r.record_date}</span>}
                   </div>
                   <p className="text-slate-700 mt-1">{r.content}</p>
                 </div>
@@ -810,7 +808,7 @@ function StudentPortal({ student, onRefreshStudent }: { student: Student; onRefr
   );
 }
 
-// ==================== 4. CỔNG BÁO CÁO DÀNH CHO LỚP TRƯỞNG (ĐÃ BỔ SUNG NGÀY THÁNG CỤ THỂ) ====================
+// ==================== 4. CỔNG BÁO CÁO DÀNH CHO LỚP TRƯỞNG ====================
 function ClassLeaderPortal({ student, onSwitchToStudentView }: { student: Student; onSwitchToStudentView: () => void }) {
   const [classStudents, setClassStudents] = useState<Student[]>([]);
   const [weekNumber, setWeekNumber] = useState<number>(1);
@@ -892,7 +890,6 @@ function ClassLeaderPortal({ student, onSwitchToStudentView }: { student: Studen
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* PHẦN LỚP TRƯỞNG NHẬP VI PHẠM / KHEN THƯỞNG CỤ THỂ */}
         <div className="bg-white p-5 rounded-2xl border shadow-sm space-y-4">
           <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2 border-b pb-2">
             <ShieldAlert className="w-4 h-4 text-indigo-600" /> Nhập Vi Phạm / Khen Thưởng Cá Nhân
@@ -943,7 +940,6 @@ function ClassLeaderPortal({ student, onSwitchToStudentView }: { student: Studen
           </form>
         </div>
 
-        {/* PHẦN LỚP TRƯỞNG BÁO CÁO THI ĐỦA TỔ TUẦN */}
         <div className="bg-white p-5 rounded-2xl border shadow-sm space-y-4">
           <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2 border-b pb-2">
             <Trophy className="w-4 h-4 text-amber-500" /> Báo Cáo Điểm Thi Đua Các Tổ Trong Tuần

@@ -243,30 +243,44 @@ function LoginScreen({ teachers, onTeacherLogin, onStudentLogin, onAdminLogin, o
       return;
     }
 
-    if (role === 'student') {
-      if (!selectedTeacherId) {
-        setLoading(false);
-        setError('Vui lòng chọn Lớp/Giáo viên chủ nhiệm của em!');
-        return;
-      }
+   if (role === 'student') {
+  if (!selectedTeacherId) {
+    setLoading(false);
+    setError('Vui lòng chọn Lớp/Giáo viên chủ nhiệm của em!');
+    return;
+  }
 
-      // Đăng nhập kết hợp MSHS + Teacher_ID phân định chính xác
-      const { data, error: stErr } = await supabase
-        .from('students')
-        .select('*')
-        .eq('teacher_id', selectedTeacherId)
-        .eq('code', studentCode.trim().toUpperCase())
-        .single();
+  const inputCode = studentCode.trim().toUpperCase();
 
-      setLoading(false);
+  // BƯỚC 1: Tìm học sinh theo đúng teacher_id đã chọn
+  let { data, error: stErr } = await supabase
+    .from('students')
+    .select('*')
+    .eq('teacher_id', selectedTeacherId)
+    .eq('code', inputCode);
 
-      if (stErr || !data) {
-        setError('Mã số MSHS không tồn tại trong lớp của Giáo viên đã chọn!');
-      } else {
-        onStudentLogin(data as Student);
-      }
+  // BƯỚC 2: Dự phòng - Nếu ID giáo viên bị lệch do tài khoản cũ, tìm theo MSHS trên toàn hệ thống
+  if (!data || data.length === 0) {
+    const { data: fallbackData } = await supabase
+      .from('students')
+      .select('*')
+      .eq('code', inputCode);
+      
+    if (fallbackData && fallbackData.length > 0) {
+      data = fallbackData;
     }
-  };
+  }
+
+  setLoading(false);
+
+  if (!data || data.length === 0) {
+    setError('Mã số MSHS không tồn tại trên hệ thống!');
+  } else {
+    // Nếu tìm thấy nhiều học sinh trùng mã HS001 ở các lớp khác nhau, chọn đúng học sinh thuộc lớp đã chọn
+    const matchedStudent = data.find((s: any) => s.teacher_id === selectedTeacherId) || data[0];
+    onStudentLogin(matchedStudent as Student);
+  }
+}
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4">

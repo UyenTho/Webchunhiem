@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import * as XLSX from 'xlsx';
 import {
   Users, Wallet, CheckCircle, XCircle, Trash2, Award, LogOut,
-  ShieldAlert, Trophy, Bell, AlertCircle, RefreshCw, BookOpen, FileText, Calendar, PlusCircle
+  ShieldAlert, Trophy, Bell, AlertCircle, RefreshCw, BookOpen, FileText, PlusCircle
 } from 'lucide-react';
 import { supabase } from './supabaseClient';
 
@@ -127,7 +127,8 @@ export default function App() {
           onTeacherLogin={(teacher: Teacher) => { setCurrentTeacher(teacher); setCurrentView('teacher'); }}
           onStudentLogin={(student: Student) => {
             setLoggedInStudent(student);
-            if (student.class_role === 'Lớp trưởng') {
+            const r = (student.class_role || '').toLowerCase().trim();
+            if (r.includes('lớp trưởng') || r.includes('lop truong')) {
               setCurrentView('class_leader_portal');
             } else {
               setCurrentView('student_portal');
@@ -170,13 +171,26 @@ export default function App() {
       )}
 
       {currentView === 'student_portal' && loggedInStudent && (
-        <StudentPortal
-          student={loggedInStudent}
-          onRefreshStudent={async () => {
-            const { data } = await supabase.from('students').select('*').eq('id', loggedInStudent.id).single();
-            if (data) setLoggedInStudent(data as Student);
-          }}
-        />
+        <div className="space-y-2">
+          {((loggedInStudent.class_role || '').toLowerCase().includes('lớp trưởng') ||
+            (loggedInStudent.class_role || '').toLowerCase().includes('lop truong')) && (
+            <div className="max-w-5xl mx-auto pt-4 px-4 text-right">
+              <button
+                onClick={() => setCurrentView('class_leader_portal')}
+                className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs px-4 py-2 rounded-xl shadow"
+              >
+                🚀 Mở Cổng Báo Cáo Thi Đua Lớp Trưởng
+              </button>
+            </div>
+          )}
+          <StudentPortal
+            student={loggedInStudent}
+            onRefreshStudent={async () => {
+              const { data } = await supabase.from('students').select('*').eq('id', loggedInStudent.id).single();
+              if (data) setLoggedInStudent(data as Student);
+            }}
+          />
+        </div>
       )}
     </div>
   );
@@ -808,7 +822,7 @@ function StudentPortal({ student, onRefreshStudent }: { student: Student; onRefr
   );
 }
 
-// ==================== 4. CỔNG BÁO CÁO DÀNH CHO LỚP TRƯỞNG (ĐÃ BỔ SUNG ĐẦY ĐỦ MỤC) ====================
+// ==================== 4. CỔNG BÁO CÁO DÀNH CHO LỚP TRƯỞNG ====================
 function ClassLeaderPortal({ student, onSwitchToStudentView }: { student: Student; onSwitchToStudentView: () => void }) {
   const [classStudents, setClassStudents] = useState<Student[]>([]);
   const [weekNumber, setWeekNumber] = useState<number>(1);

@@ -327,8 +327,6 @@ function RegisterWithPaymentScreen({ onSuccess, onCancel }: any) {
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  const qrUrl = `https://img.vietqr.io/image/${BANK_INFO.BANK_ID}-${BANK_INFO.ACCOUNT_NO}-compact2.png?amount=${BANK_INFO.PRICE_PER_YEAR}&addInfo=MUA%20WEB%20${phone}&accountName=${encodeURIComponent(BANK_INFO.ACCOUNT_NAME)}`;
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (password.length < 6) {
@@ -364,7 +362,7 @@ function RegisterWithPaymentScreen({ onSuccess, onCancel }: any) {
   return (
     <div className="min-h-screen flex items-center justify-center p-4 text-xs">
       <div className="bg-white max-w-lg w-full rounded-2xl shadow-xl p-8 space-y-5">
-        <h2 className="text-xl font-bold text-slate-800 text-center">Đăng Ký & Thanh Toán Bản Quyền SaaS</h2>
+        <h2 className="text-xl font-bold text-slate-800 text-center">Đăng Ký Bản Quyền SaaS</h2>
 
         {!isSubmitted ? (
           <form onSubmit={handleSubmit} className="space-y-3">
@@ -389,24 +387,17 @@ function RegisterWithPaymentScreen({ onSuccess, onCancel }: any) {
               <input type="text" placeholder="THPT Chuyên..." value={school} onChange={e => setSchool(e.target.value)} className="w-full p-2.5 border rounded-xl" />
             </div>
             <button type="submit" disabled={loading} className="w-full py-3 bg-purple-700 hover:bg-purple-800 text-white rounded-xl font-bold text-sm shadow transition">
-              {loading ? 'Đang khởi tạo...' : 'Tiếp Tục Thanh Toán QR'}
+              {loading ? 'Đang khởi tạo...' : 'Đăng Ký'}
             </button>
           </form>
         ) : (
           <div className="space-y-4 text-center">
             <div className="p-3.5 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl font-medium">
-              Đơn đăng ký đã ghi nhận! Vui lòng chuyển khoản để Admin duyệt kích hoạt tài khoản.
-              (Nếu Supabase yêu cầu xác nhận Gmail, hãy kiểm tra hộp thư và bấm link xác nhận trước.)
-            </div>
-            <div className="bg-slate-50 p-4 border rounded-2xl inline-block shadow-inner">
-              <img src={qrUrl} alt="Mã QR Thanh Toán" className="w-60 h-60 mx-auto rounded-xl shadow" />
-              <div className="mt-3 text-[11px] text-slate-600 space-y-1">
-                <p>Số tiền: <strong className="text-purple-700">{BANK_INFO.PRICE_PER_YEAR.toLocaleString()} VNĐ / năm</strong></p>
-                <p>Nội dung chuyển khoản: <strong className="text-rose-600">MUA WEB {phone}</strong></p>
-              </div>
+              Đơn đăng ký đã ghi nhận! Vui lòng chuyển khoản/thanh toán học phí bản quyền cho Admin theo thông tin liên hệ đã được cung cấp, sau đó bấm nút bên dưới để báo Admin kiểm tra và kích hoạt tài khoản.
+              <br />(Nếu Supabase yêu cầu xác nhận Gmail, hãy kiểm tra hộp thư và bấm link xác nhận trước.)
             </div>
             <button onClick={onSuccess} className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow">
-              Tôi Đã Chuyển Khoản (Quay Lại Màn Hình Đăng Nhập)
+              ✅ Tôi Đã Thanh Toán — Quay Lại Đăng Nhập
             </button>
           </div>
         )}
@@ -415,7 +406,6 @@ function RegisterWithPaymentScreen({ onSuccess, onCancel }: any) {
     </div>
   );
 }
-
 // ==================== 3. CỔNG THÔNG TIN DÀNH CHO HỌC SINH ====================
 function StudentPortal({ student, onRefreshStudent }: { student: Student; onRefreshStudent: () => void }) {
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);

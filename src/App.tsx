@@ -6,7 +6,7 @@ import {
 import emailjs from '@emailjs/browser';
 import { supabase } from './supabaseClient';
 
-// ==================== INTERFACES (ĐỊNH NGHĨA KIỂU DỮ LIỆU CHUẨN TYPESCRIPT) ====================
+// ==================== INTERFACES ====================
 interface Teacher {
   id: string;
   full_name: string;
@@ -201,7 +201,16 @@ function LoginScreen({ onTeacherLogin, onStudentLogin, onAdminLogin, onForgotPas
       const { data, error: fetchErr } = await supabase.from('teachers').select('*').eq('email', inputEmail);
       setLoading(false);
 
-      if (fetchErr || !data || data.length === 0) {
+      if (fetchErr) {
+        if (fetchErr.message.includes('public.teachers')) {
+          setError('Lỗi Database: Chưa tạo bảng teachers trong Supabase. Vui lòng chạy lệnh SQL khởi tạo!');
+        } else {
+          setError('Lỗi kết nối: ' + fetchErr.message);
+        }
+        return;
+      }
+
+      if (!data || data.length === 0) {
         setError('Email Gmail này CHƯA ĐĂNG KÝ mua bản quyền! Vui lòng nhấn Đăng ký.');
         return;
       }
@@ -313,7 +322,14 @@ function RegisterWithPaymentScreen({ onSuccess, onCancel }: any) {
     setLoading(true);
     const inputEmail = email.trim().toLowerCase();
 
-    const { data: existing } = await supabase.from('teachers').select('id').eq('email', inputEmail);
+    const { data: existing, error: checkErr } = await supabase.from('teachers').select('id').eq('email', inputEmail);
+    
+    if (checkErr) {
+      setLoading(false);
+      alert('Lỗi CSDL: ' + checkErr.message + '\nHãy chạy script SQL trong Supabase Editor để khởi tạo bảng.');
+      return;
+    }
+
     if (existing && existing.length > 0) {
       setLoading(false);
       alert('Email Gmail này ĐÃ ĐƯỢC ĐĂNG KÝ! Vui lòng chờ Admin duyệt hoặc quét QR xem lại.');
@@ -392,7 +408,6 @@ function StudentPortal({ student, onRefreshStudent }: { student: Student; onRefr
   const [records, setRecords] = useState<StudentRecord[]>([]);
   const [showRules, setShowRules] = useState(false);
 
-  // Trạng thái Form Khảo sát đầu năm
   const [surveyData, setSurveyData] = useState({
     p_fullname: student.full_name || '',
     p_dob: student.dob || '',
@@ -458,14 +473,12 @@ function StudentPortal({ student, onRefreshStudent }: { student: Student; onRefr
     }
   };
 
-  // Tính điểm thi đua an toàn
   const totalDeduction = (records || []).filter(r => r.type === 'violation').reduce((sum, r) => sum + Number(r.points || 0), 0);
   const totalBonus = (records || []).filter(r => r.type === 'commendation').reduce((sum, r) => sum + Number(r.points || 0), 0);
   const currentTotalScore = 100 - totalDeduction + totalBonus;
 
   return (
     <div className="max-w-5xl mx-auto p-4 md:p-6 space-y-6 text-xs font-sans">
-      {/* THÔNG TIN TỔNG QUAN HỌC SINH */}
       <div className="bg-white p-5 rounded-2xl border shadow-sm flex justify-between items-center flex-wrap gap-4">
         <div>
           <span className="text-xs bg-indigo-100 text-indigo-800 px-2.5 py-1 rounded-md font-bold">{student.code}</span>
@@ -483,7 +496,6 @@ function StudentPortal({ student, onRefreshStudent }: { student: Student; onRefr
         </div>
       </div>
 
-      {/* MỤC NỘI QUY ĐIỂM THI ĐỦA */}
       {showRules && (
         <div className="bg-white p-6 rounded-2xl border border-amber-200 shadow-sm space-y-5">
           <div className="border-b pb-3 text-center">
@@ -565,7 +577,6 @@ function StudentPortal({ student, onRefreshStudent }: { student: Student; onRefr
         </div>
       )}
 
-      {/* MỤC 5: KHẢO SÁT ĐẦU NĂM HỌC (ẨN KHI ĐÃ NỘP) */}
       {!student.survey_completed && (
         <div className="bg-gradient-to-br from-indigo-50 via-purple-50 to-pink-50 p-6 rounded-2xl border border-indigo-200 shadow-sm space-y-4">
           <div className="flex items-center gap-2 text-indigo-900 font-bold text-sm border-b pb-2">
@@ -663,7 +674,6 @@ function StudentPortal({ student, onRefreshStudent }: { student: Student; onRefr
         </div>
       )}
 
-      {/* MỤC 1: NHẬT KÝ RÈN LUYỆN */}
       <div className="bg-white p-5 rounded-2xl border shadow-sm space-y-3">
         <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2 border-b pb-2">
           <Award className="w-4.5 h-4.5 text-indigo-600" /> Nhật Ký Rèn Luyện / Điểm Thi Đua Cá Nhân
@@ -690,7 +700,6 @@ function StudentPortal({ student, onRefreshStudent }: { student: Student; onRefr
         )}
       </div>
 
-      {/* MỤC 2: CÁC KHOẢN TIỀN CHƯA NỘP, ĐÃ NỘP, HẠN HOÀN THÀNH */}
       <div className="bg-white p-5 rounded-2xl border shadow-sm space-y-3">
         <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2 border-b pb-2">
           <Wallet className="w-4.5 h-4.5 text-indigo-600" /> Các Khoản Thu & Quỹ Lớp
@@ -737,7 +746,6 @@ function StudentPortal({ student, onRefreshStudent }: { student: Student; onRefr
         )}
       </div>
 
-      {/* MỤC 3: CÁC THÔNG BÁO TỪ GVCN */}
       <div className="bg-white p-5 rounded-2xl border shadow-sm space-y-3">
         <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2 border-b pb-2">
           <Bell className="w-4.5 h-4.5 text-indigo-600" /> Thông Báo & Dặn Dò Từ Giáo Viên Chủ Nhiệm
@@ -842,7 +850,6 @@ function ClassLeaderPortal({ student, onSwitchToStudentView }: { student: Studen
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* PHẦN NHẬP VI PHẠM / KHEN THƯỞNG CÁ NHÂN */}
         <div className="bg-white p-5 rounded-2xl border shadow-sm space-y-4">
           <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2 border-b pb-2">
             <ShieldAlert className="w-4 h-4 text-indigo-600" /> Báo Cáo Vi Phạm / Khen Thưởng Cá Nhân
@@ -882,7 +889,6 @@ function ClassLeaderPortal({ student, onSwitchToStudentView }: { student: Studen
           </form>
         </div>
 
-        {/* PHẦN NHẬP ĐIỂM THI ĐỦA CÁC TỔ TRONG TUẦN */}
         <div className="bg-white p-5 rounded-2xl border shadow-sm space-y-4">
           <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2 border-b pb-2">
             <Trophy className="w-4 h-4 text-amber-500" /> Báo Cáo Điểm Thi Đua Các Tổ Trong Tuần
@@ -1144,7 +1150,6 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
         </div>
       )}
 
-      {/* MODAL HIỂN THỊ ĐẦY ĐỦ BẢNG THÔNG TIN ĐIỀU TRA HỌC SINH (SỬA LỖI ACCESSIBILITY NULL CHUẨN) */}
       {selectedStudentForModal && (
         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-white max-w-3xl w-full max-h-[90vh] overflow-y-auto rounded-2xl shadow-2xl p-6 space-y-4 text-xs">

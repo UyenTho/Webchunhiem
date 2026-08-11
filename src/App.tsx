@@ -855,14 +855,20 @@ function ClassLeaderPortal({ student, onSwitchToStudentView }: { student: Studen
 
   const handleAddIndividualRecord = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedStudentId || !content.trim()) return;
+    if (!selectedStudentId || !content.trim()) {
+      alert('Vui lòng chọn học sinh và nhập nội dung!');
+      return;
+    }
 
     const parsedPoints = parseInt(pointsStr, 10) || 1;
 
-    // ĐỘNG XỬ LÝ LỖI MẤT CỘT record_date BẰNG CÁCH CHẤP NHẬN CẢ RECORD_DATE & RECORD_TYPE
+    // Lấy thông tin học sinh được chọn để đảm bảo lấy đúng teacher_id
+    const targetStudent = classStudents.find((s: Student) => s.id === selectedStudentId);
+    const teacherIdToUse = targetStudent?.teacher_id || student.teacher_id || null;
+
     const recordPayload: any = {
       student_id: selectedStudentId,
-      teacher_id: student.teacher_id,
+      teacher_id: teacherIdToUse,
       week_number: weekNumber,
       record_date: recordDate,
       type: recordType,
@@ -871,14 +877,7 @@ function ClassLeaderPortal({ student, onSwitchToStudentView }: { student: Studen
       points: parsedPoints
     };
 
-    let { error } = await supabase.from('student_records').insert([recordPayload]);
-
-    if (error && error.message.includes('column')) {
-      delete recordPayload.record_date;
-      delete recordPayload.record_type;
-      const res = await supabase.from('student_records').insert([recordPayload]);
-      error = res.error;
-    }
+    const { error } = await supabase.from('student_records').insert([recordPayload]);
 
     if (!error) {
       alert('Đã lưu điểm vi phạm/khen thưởng thành công cho học sinh!');
@@ -888,7 +887,6 @@ function ClassLeaderPortal({ student, onSwitchToStudentView }: { student: Studen
       alert('Lỗi khi lưu điểm: ' + error.message);
     }
   };
-
   const handleSubmitWeeklySummary = async (e: React.FormEvent) => {
     e.preventDefault();
     const g1 = parseInt(groupScores.group1, 10) || 0;

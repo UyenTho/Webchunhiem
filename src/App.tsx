@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import * as XLSX from 'xlsx';
 import {
   Users, Wallet, CheckCircle, XCircle, Trash2, Award, LogOut,
-  ShieldAlert, Trophy, Bell, AlertCircle, RefreshCw, BookOpen, FileText
+  ShieldAlert, Trophy, Bell, AlertCircle, RefreshCw, BookOpen, FileText, Calendar
 } from 'lucide-react';
 import { supabase } from './supabaseClient';
 
@@ -61,10 +61,9 @@ interface StudentRecord {
   type: 'violation' | 'commendation';
   content: string;
   points: number;
+  record_date?: string;
   created_at?: string;
 }
-
-// ==================== CẤU HÌNH THANH TOÁN ====================
 
 type ViewType =
   | 'login' | 'forgot_password' | 'reset_password' | 'register_payment'
@@ -86,9 +85,8 @@ export default function App() {
     }
   };
 
-  // Lắng nghe sự kiện "Quên mật khẩu": khi người dùng bấm link trong email,
-  // Supabase sẽ tự tạo phiên đăng nhập tạm và bắn event PASSWORD_RECOVERY.
   useEffect(() => {
+    fetchTeachers();
     const { data: listener } = supabase.auth.onAuthStateChange((event) => {
       if (event === 'PASSWORD_RECOVERY') {
         setCurrentView('reset_password');
@@ -125,6 +123,7 @@ export default function App() {
       {/* ROUTING MÀN HÌNH */}
       {currentView === 'login' && (
         <LoginScreen
+          teachers={teachers}
           onTeacherLogin={(teacher: Teacher) => { setCurrentTeacher(teacher); setCurrentView('teacher'); }}
           onStudentLogin={(student: Student) => {
             setLoggedInStudent(student);
@@ -174,7 +173,7 @@ export default function App() {
         <StudentPortal
           student={loggedInStudent}
           onRefreshStudent={async () => {
-            const { data } = await supabase.rpc('student_login', { p_code: loggedInStudent.code });
+            const { data } = await supabase.from('students').select('*').eq('id', loggedInStudent.id).single();
             if (data) setLoggedInStudent(data as Student);
           }}
         />
@@ -183,12 +182,13 @@ export default function App() {
   );
 }
 
-// ==================== 1. MÀN HÌNH ĐĂNG NHẬP ====================
-function LoginScreen({ onTeacherLogin, onStudentLogin, onAdminLogin, onForgotPassword, onRegister }: any) {
+// ==================== 1. MÀN HÌNH ĐĂNG NHẬP (CÓ CHỌN GV CỦA HỌC SINH) ====================
+function LoginScreen({ teachers, onTeacherLogin, onStudentLogin, onAdminLogin, onForgotPassword, onRegister }: any) {
   const [role, setRole] = useState<'teacher' | 'student' | 'admin'>('teacher');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [studentCode, setStudentCode] = useState('');
+  const [selectedTeacherId, setSelectedTeacherId] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -233,7 +233,6 @@ function LoginScreen({ onTeacherLogin, onStudentLogin, onAdminLogin, onForgotPas
         return;
       }
 
-      // role === 'teacher'
       if (!profile.is_approved) {
         setError('Tài khoản của thầy/cô ĐANG CHỜ ADMIN DUYỆT / CHƯA CHUYỂN TIỀN.');
         await supabase.auth.signOut();
@@ -245,11 +244,24 @@ function LoginScreen({ onTeacherLogin, onStudentLogin, onAdminLogin, onForgotPas
     }
 
     if (role === 'student') {
-      const { data, error: rpcErr } = await supabase.rpc('student_login', { p_code: studentCode.trim() });
+      if (!selectedTeacherId) {
+        setLoading(false);
+        setError('Vui lòng chọn Lớp/Giáo viên chủ nhiệm của em!');
+        return;
+      }
+
+      // Đăng nhập kết hợp MSHS + Teacher_ID phân định chính xác
+      const { data, error: stErr } = await supabase
+        .from('students')
+        .select('*')
+        .eq('teacher_id', selectedTeacherId)
+        .eq('code', studentCode.trim().toUpperCase())
+        .single();
+
       setLoading(false);
 
-      if (rpcErr || !data) {
-        setError('Mã số MSHS không tồn tại trên hệ thống!');
+      if (stErr || !data) {
+        setError('Mã số MSHS không tồn tại trong lớp của Giáo viên đã chọn!');
       } else {
         onStudentLogin(data as Student);
       }
@@ -289,11 +301,22 @@ function LoginScreen({ onTeacherLogin, onStudentLogin, onAdminLogin, onForgotPas
           )}
 
           {role === 'student' && (
-            <div>
-              <label className="font-semibold block mb-1">Nhập Mã Số Học Sinh (MSHS):</label>
-              <input type="text" required placeholder="VD: HS001" value={studentCode} onChange={e => setStudentCode(e.target.value)} className="w-full p-3 border rounded-xl text-sm uppercase font-mono" />
-              <p className="text-[11px] text-indigo-600 mt-1.5 italic">* Lớp trưởng đăng nhập bằng MSHS sẽ được chuyển trực tiếp vào Cổng Báo Cáo.</p>
-            </div>
+            <>
+              <div>
+                <label className="font-semibold block mb-1">Chọn Lớp / Giáo viên chủ nhiệm (*):</label>
+                <select value={selectedTeacherId} onChange={e => setSelectedTeacherId(e.target.value)} className="w-full p-3 border rounded-xl text-sm" required>
+                  <option value="">-- Chọn Giáo Viên Chủ Nhiệm --</option>
+                  {teachers.filter((t: Teacher) => t.is_approved).map((t: Teacher) => (
+                    <option key={t.id} value={t.id}>GV: {t.full_name} ({t.school || 'THPT'})</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="font-semibold block mb-1">Nhập Mã Số Học Sinh (MSHS):</label>
+                <input type="text" required placeholder="VD: HS001" value={studentCode} onChange={e => setStudentCode(e.target.value)} className="w-full p-3 border rounded-xl text-sm uppercase font-mono" />
+                <p className="text-[11px] text-indigo-600 mt-1.5 italic">* Lớp trưởng đăng nhập bằng MSHS sẽ tự động chuyển vào Cổng Báo Cáo.</p>
+              </div>
+            </>
           )}
 
           <button type="submit" disabled={loading} className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-sm shadow transition">
@@ -388,8 +411,7 @@ function RegisterWithPaymentScreen({ onSuccess, onCancel }: any) {
         ) : (
           <div className="space-y-4 text-center">
             <div className="p-3.5 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl font-medium">
-              Đơn đăng ký đã ghi nhận! Vui lòng chuyển khoản/thanh toán học phí bản quyền cho Admin theo thông tin liên hệ đã được cung cấp, sau đó bấm nút bên dưới để báo Admin kiểm tra và kích hoạt tài khoản.
-              <br />(Nếu Supabase yêu cầu xác nhận Gmail, hãy kiểm tra hộp thư và bấm link xác nhận trước.)
+              Đơn đăng ký đã ghi nhận! Vui lòng chuyển khoản/thanh toán học phí bản quyền cho Admin theo thông tin liên hệ, sau đó bấm nút bên dưới để báo Admin kích hoạt tài khoản.
             </div>
             <button onClick={onSuccess} className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow">
               ✅ Tôi Đã Thanh Toán — Quay Lại Đăng Nhập
@@ -401,6 +423,7 @@ function RegisterWithPaymentScreen({ onSuccess, onCancel }: any) {
     </div>
   );
 }
+
 // ==================== 3. CỔNG THÔNG TIN DÀNH CHO HỌC SINH ====================
 function StudentPortal({ student, onRefreshStudent }: { student: Student; onRefreshStudent: () => void }) {
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
@@ -444,21 +467,25 @@ function StudentPortal({ student, onRefreshStudent }: { student: Student; onRefr
   }, [student.id]);
 
   const fetchStudentData = async () => {
-    const { data, error } = await supabase.rpc('get_student_portal_data', { p_student_id: student.id });
-    if (!error && data) {
-      setAnnouncements(data.announcements || []);
-      setFeeItems(data.fee_items || []);
-      setFeePayments(data.fee_payments || []);
-      setRecords(data.student_records || []);
-    }
+    const { data: annData } = await supabase.from('announcements').select('*').eq('teacher_id', student.teacher_id).order('created_date', { ascending: false });
+    if (annData) setAnnouncements(annData as Announcement[]);
+
+    const { data: feeData } = await supabase.from('fee_items').select('*').eq('teacher_id', student.teacher_id);
+    if (feeData) setFeeItems(feeData as FeeItem[]);
+
+    const { data: payData } = await supabase.from('fee_payments').select('*').eq('student_id', student.id);
+    if (payData) setFeePayments(payData as FeePayment[]);
+
+    const { data: recData } = await supabase.from('student_records').select('*').eq('student_id', student.id).order('week_number', { ascending: false });
+    if (recData) setRecords(recData as StudentRecord[]);
   };
 
   const handleSaveSurvey = async (e: React.FormEvent) => {
     e.preventDefault();
-    const { error } = await supabase.rpc('submit_student_survey', {
-      p_student_id: student.id,
-      p_survey: surveyData
-    });
+    const { error } = await supabase.from('students').update({
+      survey_completed: true,
+      survey_info: surveyData
+    }).eq('id', student.id);
 
     if (error) {
       alert('Lỗi lưu khảo sát: ' + error.message);
@@ -680,11 +707,13 @@ function StudentPortal({ student, onRefreshStudent }: { student: Student; onRefr
             {records.map((r: StudentRecord) => (
               <div key={r.id} className={`p-3 rounded-xl border flex justify-between items-center ${r.type === 'violation' ? 'bg-rose-50/60 border-rose-200' : 'bg-emerald-50/60 border-emerald-200'}`}>
                 <div>
-                  <span className={`font-bold text-xs ${r.type === 'violation' ? 'text-rose-800' : 'text-emerald-800'}`}>
-                    {r.type === 'violation' ? '⚠️ Vi Phạm' : '🌟 Khen Thưởng'} - Tuần {r.week_number}
-                  </span>
-                  <p className="text-slate-700 mt-0.5">{r.content}</p>
-                  <span className="text-[10px] text-slate-400">{r.created_at?.slice(0, 10)}</span>
+                  <div className="flex items-center gap-2">
+                    <span className={`font-bold text-xs ${r.type === 'violation' ? 'text-rose-800' : 'text-emerald-800'}`}>
+                      {r.type === 'violation' ? '⚠️ Vi Phạm' : '🌟 Khen Thưởng'} - Tuần {r.week_number}
+                    </span>
+                    {r.record_date && <span className="text-[11px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded font-mono">📅 Ngày vi phạm: {r.record_date}</span>}
+                  </div>
+                  <p className="text-slate-700 mt-1">{r.content}</p>
                 </div>
                 <span className={`font-black text-sm ${r.type === 'violation' ? 'text-rose-600' : 'text-emerald-600'}`}>
                   {r.type === 'violation' ? `-${r.points}` : `+${r.points}`}đ
@@ -767,10 +796,11 @@ function StudentPortal({ student, onRefreshStudent }: { student: Student; onRefr
   );
 }
 
-// ==================== 4. CỔNG BÁO CÁO DÀNH CHO LỚP TRƯỞNG ====================
+// ==================== 4. CỔNG BÁO CÁO DÀNH CHO LỚP TRƯỞNG (ĐÃ BỔ SUNG NGÀY THÁNG CỤ THỂ) ====================
 function ClassLeaderPortal({ student, onSwitchToStudentView }: { student: Student; onSwitchToStudentView: () => void }) {
   const [classStudents, setClassStudents] = useState<Student[]>([]);
   const [weekNumber, setWeekNumber] = useState<number>(1);
+  const [recordDate, setRecordDate] = useState<string>(new Date().toISOString().slice(0, 10));
   const [selectedStudentId, setSelectedStudentId] = useState('');
   const [recordType, setRecordType] = useState<'violation' | 'commendation'>('violation');
   const [content, setContent] = useState('');
@@ -784,7 +814,7 @@ function ClassLeaderPortal({ student, onSwitchToStudentView }: { student: Studen
   }, [student.id]);
 
   const fetchClassData = async () => {
-    const { data, error } = await supabase.rpc('leader_get_classmates', { p_leader_id: student.id });
+    const { data, error } = await supabase.from('students').select('*').eq('teacher_id', student.teacher_id).order('code', { ascending: true });
     if (!error && data) setClassStudents(data as Student[]);
   };
 
@@ -792,17 +822,20 @@ function ClassLeaderPortal({ student, onSwitchToStudentView }: { student: Studen
     e.preventDefault();
     if (!selectedStudentId || !content) return;
 
-    const { error } = await supabase.rpc('leader_add_record', {
-      p_leader_id: student.id,
-      p_target_student_id: selectedStudentId,
-      p_week: weekNumber,
-      p_type: recordType,
-      p_content: content,
-      p_points: points
-    });
+    const { error } = await supabase.from('student_records').insert([
+      {
+        student_id: selectedStudentId,
+        teacher_id: student.teacher_id,
+        week_number: weekNumber,
+        record_date: recordDate,
+        type: recordType,
+        content: content,
+        points: points
+      }
+    ]);
 
     if (!error) {
-      alert('Đã lưu điểm vi phạm/khen thưởng cho học sinh!');
+      alert('Đã ghi nhận điểm vi phạm/khen thưởng cho học sinh!');
       setContent('');
     } else {
       alert('Lỗi: ' + error.message);
@@ -814,11 +847,15 @@ function ClassLeaderPortal({ student, onSwitchToStudentView }: { student: Studen
     const title = `[THI ĐUA LỚP TUẦN ${weekNumber}]`;
     const summaryText = `📊 BÁO CÁO THI ĐUA TỔ TUẦN ${weekNumber}:\n- Tổ 1: ${groupScores.group1}đ | Tổ 2: ${groupScores.group2}đ\n- Tổ 3: ${groupScores.group3}đ | Tổ 4: ${groupScores.group4}đ\n\n📝 Ghi chú Lớp trưởng: ${leaderNote || 'Không có'}`;
 
-    const { error } = await supabase.rpc('leader_submit_summary', {
-      p_leader_id: student.id,
-      p_title: title,
-      p_content: summaryText
-    });
+    const { error } = await supabase.from('announcements').insert([
+      {
+        teacher_id: student.teacher_id,
+        title: title,
+        content: summaryText,
+        important: true,
+        created_date: new Date().toISOString().slice(0, 10)
+      }
+    ]);
 
     if (!error) {
       alert('Đã nộp báo cáo tổng hợp thi đua tuần cho Giáo viên chủ nhiệm!');
@@ -833,7 +870,7 @@ function ClassLeaderPortal({ student, onSwitchToStudentView }: { student: Studen
       <div className="bg-indigo-800 text-white p-5 rounded-2xl shadow-lg flex justify-between items-center flex-wrap gap-3">
         <div>
           <span className="bg-indigo-600 border border-indigo-400 px-2.5 py-1 rounded text-[11px] font-bold uppercase">LỚP TRƯỞNG PORTAL</span>
-          <h1 className="text-xl font-bold mt-1">Nộp Báo Cáo Thi Đua - {student.full_name}</h1>
+          <h1 className="text-xl font-bold mt-1">Cổng Báo Cáo Thi Đua - Lớp Trưởng: {student.full_name}</h1>
         </div>
         <button onClick={onSwitchToStudentView} className="bg-white text-indigo-900 px-3.5 py-2 rounded-xl font-bold hover:bg-indigo-50 shadow transition">
           👁️ Xem Trang Cá Nhân Học Sinh
@@ -841,45 +878,58 @@ function ClassLeaderPortal({ student, onSwitchToStudentView }: { student: Studen
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {/* PHẦN LỚP TRƯỞNG NHẬP VI PHẠM / KHEN THƯỞNG CỤ THỂ */}
         <div className="bg-white p-5 rounded-2xl border shadow-sm space-y-4">
           <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2 border-b pb-2">
-            <ShieldAlert className="w-4 h-4 text-indigo-600" /> Báo Cáo Vi Phạm / Khen Thưởng Cá Nhân
+            <ShieldAlert className="w-4 h-4 text-indigo-600" /> Nhập Vi Phạm / Khen Thưởng Cá Nhân
           </h2>
           <form onSubmit={handleAddIndividualRecord} className="space-y-3">
-            <div>
-              <label className="font-semibold block mb-1">Chọn Tuần Học:</label>
-              <input type="number" min="1" max="52" value={weekNumber} onChange={e => setWeekNumber(Number(e.target.value))} className="w-full p-2 border rounded-xl" required />
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="font-semibold block mb-1">Chọn Tuần Học (*):</label>
+                <input type="number" min="1" max="52" value={weekNumber} onChange={e => setWeekNumber(Number(e.target.value))} className="w-full p-2 border rounded-xl" required />
+              </div>
+              <div>
+                <label className="font-semibold block mb-1">Ngày Tháng Cụ Thể (*):</label>
+                <input type="date" value={recordDate} onChange={e => setRecordDate(e.target.value)} className="w-full p-2 border rounded-xl" required />
+              </div>
             </div>
+
             <div>
-              <label className="font-semibold block mb-1">Chọn Học Sinh Trong Lớp:</label>
+              <label className="font-semibold block mb-1">Chọn Học Sinh Trong Lớp (*):</label>
               <select value={selectedStudentId} onChange={e => setSelectedStudentId(e.target.value)} className="w-full p-2 border rounded-xl" required>
-                <option value="">-- Chọn Học Sinh --</option>
+                <option value="">-- Chọn Học Sinh Trong Lớp --</option>
                 {classStudents.map((s: Student) => (
-                  <option key={s.id} value={s.id}>{s.full_name} (Tổ {s.group_number || 1}) - {s.code}</option>
+                  <option key={s.id} value={s.id}>{s.full_name} (Tổ {s.group_number || 1}) - MSHS: {s.code}</option>
                 ))}
               </select>
             </div>
+
             <div>
               <label className="font-semibold block mb-1">Loại Ghi Nhận:</label>
               <div className="grid grid-cols-2 gap-2">
-                <button type="button" onClick={() => setRecordType('violation')} className={`py-2 rounded-xl font-bold transition ${recordType === 'violation' ? 'bg-rose-600 text-white' : 'bg-slate-100'}`}>⚠️ Vi Phạm</button>
-                <button type="button" onClick={() => setRecordType('commendation')} className={`py-2 rounded-xl font-bold transition ${recordType === 'commendation' ? 'bg-emerald-600 text-white' : 'bg-slate-100'}`}>🌟 Khen Thưởng</button>
+                <button type="button" onClick={() => setRecordType('violation')} className={`py-2 rounded-xl font-bold transition ${recordType === 'violation' ? 'bg-rose-600 text-white shadow' : 'bg-slate-100 text-slate-600'}`}>⚠️ Vi Phạm</button>
+                <button type="button" onClick={() => setRecordType('commendation')} className={`py-2 rounded-xl font-bold transition ${recordType === 'commendation' ? 'bg-emerald-600 text-white shadow' : 'bg-slate-100 text-slate-600'}`}>🌟 Khen Thưởng</button>
               </div>
             </div>
+
             <div>
-              <label className="font-semibold block mb-1">Nội dung vi phạm / thành tích:</label>
-              <input type="text" placeholder="VD: Đi học muộn, Đạt điểm 10 kiểm tra..." value={content} onChange={e => setContent(e.target.value)} className="w-full p-2 border rounded-xl" required />
+              <label className="font-semibold block mb-1">Nội dung chi tiết vi phạm / khen thưởng:</label>
+              <input type="text" placeholder="VD: Đi học muộn 10 phút, Đạt điểm 10 kiểm tra Miệng..." value={content} onChange={e => setContent(e.target.value)} className="w-full p-2 border rounded-xl" required />
             </div>
+
             <div>
-              <label className="font-semibold block mb-1">Số điểm biến động:</label>
-              <input type="number" min="1" value={points} onChange={e => setPoints(Number(e.target.value))} className="w-full p-2 border rounded-xl" required />
+              <label className="font-semibold block mb-1">Số điểm cộng / trừ:</label>
+              <input type="number" min="1" value={points} onChange={e => setPoints(Number(e.target.value))} className="w-full p-2 border rounded-xl font-bold" required />
             </div>
-            <button type="submit" className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow">
+
+            <button type="submit" className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow transition">
               Lưu Điểm Cho Học Sinh
             </button>
           </form>
         </div>
 
+        {/* PHẦN LỚP TRƯỞNG BÁO CÁO THI ĐỦA TỔ TUẦN */}
         <div className="bg-white p-5 rounded-2xl border shadow-sm space-y-4">
           <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2 border-b pb-2">
             <Trophy className="w-4 h-4 text-amber-500" /> Báo Cáo Điểm Thi Đua Các Tổ Trong Tuần
@@ -904,10 +954,10 @@ function ClassLeaderPortal({ student, onSwitchToStudentView }: { student: Studen
               </div>
             </div>
             <div>
-              <label className="font-semibold block mb-1">Ghi chú nhận xét của Lớp trưởng:</label>
-              <textarea rows={3} placeholder="Nhận xét tổng quan tình hình lớp tuần qua..." value={leaderNote} onChange={e => setLeaderNote(e.target.value)} className="w-full p-2 border rounded-xl" />
+              <label className="font-semibold block mb-1">Ghi chú nhận xét của Lớp trưởng gửi GVCN:</label>
+              <textarea rows={3} placeholder="Nhận xét tình hình nề nếp chung của lớp trong tuần..." value={leaderNote} onChange={e => setLeaderNote(e.target.value)} className="w-full p-2 border rounded-xl" />
             </div>
-            <button type="submit" className="w-full py-2.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-xl shadow">
+            <button type="submit" className="w-full py-2.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-xl shadow transition">
               Gửi Báo Cáo Thi Đua Lớp
             </button>
           </form>
@@ -1019,7 +1069,7 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
         return;
       }
 
-      const { error } = await supabase.from('students').upsert(mapped, { onConflict: 'code' });
+      const { error } = await supabase.from('students').upsert(mapped, { onConflict: 'teacher_id,code' });
       if (error) alert('Lỗi khi nhập danh sách: ' + error.message);
       else {
         alert(`Đã nhập thành công ${mapped.length} học sinh!`);
@@ -1073,13 +1123,13 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
       const st = students.find(s => s.id === r.student_id);
       return {
         'Tuần': r.week_number,
+        'Ngày vi phạm': r.record_date || '',
         'MSHS': st?.code || '',
         'Họ và tên': st?.full_name || '',
         'Tổ': st?.group_number || '',
         'Loại': r.type === 'violation' ? 'Vi phạm' : 'Khen thưởng',
         'Nội dung': r.content,
         'Điểm': r.points,
-        'Ngày ghi nhận': r.created_at ? r.created_at.slice(0, 10) : '',
       };
     });
     const ws = XLSX.utils.json_to_sheet(data);
@@ -1150,7 +1200,7 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
           <div className="bg-white p-5 rounded-2xl border shadow-sm flex justify-between items-center flex-wrap gap-3">
             <div>
               <h2 className="font-bold text-slate-800 text-sm">Nhập / Xuất Danh Sách Từ Excel</h2>
-              <p className="text-slate-500 text-[11px] mt-1">File Excel cần có cột: MSHS, Họ và tên, Ngày sinh, Chức vụ, Tổ. Nhập lại mã đã có sẽ tự động cập nhật.</p>
+              <p className="text-slate-500 text-[11px] mt-1">File Excel cần có cột: MSHS, Họ và tên, Ngày sinh, Chức vụ, Tổ.</p>
             </div>
             <div className="flex gap-2">
               <input ref={fileInputRef} type="file" accept=".xlsx,.xls" onChange={handleImportExcel} className="hidden" id="excel-import" />
@@ -1162,7 +1212,7 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
           </div>
 
           <div className="bg-white p-5 rounded-2xl border shadow-sm">
-            <h2 className="font-bold text-slate-800 text-sm mb-3">Thêm Học Sinh Mới Vào Lớp (thủ công)</h2>
+            <h2 className="font-bold text-slate-800 text-sm mb-3">Thêm Học Sinh Mới Vào Lớp (Thủ công)</h2>
             <form onSubmit={handleAddStudent} className="grid grid-cols-1 md:grid-cols-6 gap-3">
               <input type="text" required placeholder="MSHS (VD: HS001)" value={newStudentCode} onChange={e => setNewStudentCode(e.target.value)} className="p-2 border rounded-xl uppercase font-mono" />
               <input type="text" required placeholder="Họ và tên" value={newStudentName} onChange={e => setNewStudentName(e.target.value)} className="p-2 border rounded-xl" />
@@ -1274,13 +1324,13 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
                 <thead className="bg-slate-50 font-bold border-b text-slate-700">
                   <tr>
                     <th className="p-2 border-r">Tuần</th>
+                    <th className="p-2 border-r text-center">Ngày ghi nhận</th>
                     <th className="p-2 border-r">MSHS</th>
                     <th className="p-2 border-r">Họ Tên</th>
                     <th className="p-2 border-r text-center">Tổ</th>
                     <th className="p-2 border-r">Loại</th>
-                    <th className="p-2 border-r">Nội dung</th>
-                    <th className="p-2 border-r text-center">Điểm</th>
-                    <th className="p-2 text-center">Ngày</th>
+                    <th className="p-2 border-r">Nội dung vi phạm / khen thưởng</th>
+                    <th className="p-2 text-center">Điểm</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y">
@@ -1291,6 +1341,7 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
                       return (
                         <tr key={r.id} className="hover:bg-slate-50">
                           <td className="p-2 border-r text-center font-bold">{r.week_number}</td>
+                          <td className="p-2 border-r text-center text-slate-600 font-mono">{r.record_date || 'N/A'}</td>
                           <td className="p-2 border-r font-mono">{st?.code}</td>
                           <td className="p-2 border-r font-semibold">{st?.full_name}</td>
                           <td className="p-2 border-r text-center">{st?.group_number || 1}</td>
@@ -1298,10 +1349,9 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
                             {r.type === 'violation' ? 'Vi phạm' : 'Khen thưởng'}
                           </td>
                           <td className="p-2 border-r">{r.content}</td>
-                          <td className={`p-2 border-r text-center font-bold ${r.type === 'violation' ? 'text-rose-600' : 'text-emerald-600'}`}>
+                          <td className={`p-2 text-center font-bold ${r.type === 'violation' ? 'text-rose-600' : 'text-emerald-600'}`}>
                             {r.type === 'violation' ? `-${r.points}` : `+${r.points}`}
                           </td>
-                          <td className="p-2 text-center text-slate-400">{r.created_at?.slice(0, 10)}</td>
                         </tr>
                       );
                     })}
@@ -1477,6 +1527,7 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
     </div>
   );
 }
+
 // ==================== 6. BẢNG QUẢN TRỊ ADMIN ====================
 function AdminDashboard({ teachers, onRefresh }: { teachers: Teacher[]; onRefresh: () => void }) {
   const handleApprove = async (id: string) => {
@@ -1486,7 +1537,7 @@ function AdminDashboard({ teachers, onRefresh }: { teachers: Teacher[]; onRefres
   };
 
   const handleDelete = async (id: string) => {
-    if (confirm('Xóa hẳn hồ sơ giáo viên này khỏi hệ thống? (Lưu ý: tài khoản đăng nhập gốc trên Supabase Auth cần được xóa riêng trong Authentication > Users nếu muốn xóa hoàn toàn.)')) {
+    if (confirm('Xóa hẳn hồ sơ giáo viên này khỏi hệ thống?')) {
       await supabase.from('teachers').delete().eq('id', id);
       await onRefresh();
     }
@@ -1497,7 +1548,7 @@ function AdminDashboard({ teachers, onRefresh }: { teachers: Teacher[]; onRefres
       <div className="bg-white p-6 rounded-2xl border shadow-sm flex justify-between items-center flex-wrap gap-3">
         <div>
           <h1 className="text-xl font-bold text-slate-800">Quản Trị Hệ Thống SaaS (Admin)</h1>
-          <p className="text-slate-500 mt-0.5">Duyệt giáo viên và quản lý đơn mua web. Giáo viên tự đổi mật khẩu qua "Quên mật khẩu".</p>
+          <p className="text-slate-500 mt-0.5">Duyệt giáo viên và quản lý đơn mua web.</p>
         </div>
         <button onClick={onRefresh} className="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-2 rounded-xl font-bold flex items-center gap-1 shadow">
           <RefreshCw className="w-3.5 h-3.5" /> Làm Mới Danh Sách
@@ -1545,7 +1596,7 @@ function AdminDashboard({ teachers, onRefresh }: { teachers: Teacher[]; onRefres
   );
 }
 
-// ==================== 7. QUÊN MẬT KHẨU (Supabase Auth) ====================
+// ==================== 7. QUÊN MẬT KHẨU ====================
 function ForgotPasswordScreen({ onBackToLogin }: { onBackToLogin: () => void }) {
   const [email, setEmail] = useState('');
   const [sent, setSent] = useState(false);
@@ -1582,7 +1633,7 @@ function ForgotPasswordScreen({ onBackToLogin }: { onBackToLogin: () => void }) 
           </form>
         ) : (
           <div className="p-3.5 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl font-medium text-center">
-            Đã gửi email chứa link đặt lại mật khẩu! Vui lòng kiểm tra hộp thư (kể cả mục Spam) và bấm vào link để đặt mật khẩu mới.
+            Đã gửi email chứa link đặt lại mật khẩu! Vui lòng kiểm tra hộp thư và bấm vào link để đặt mật khẩu mới.
           </div>
         )}
 
@@ -1592,7 +1643,7 @@ function ForgotPasswordScreen({ onBackToLogin }: { onBackToLogin: () => void }) 
   );
 }
 
-// ==================== 8. ĐẶT LẠI MẬT KHẨU MỚI (sau khi bấm link email) ====================
+// ==================== 8. ĐẶT LẠI MẬT KHẨU MỚI ====================
 function ResetPasswordScreen({ onDone }: { onDone: () => void }) {
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');

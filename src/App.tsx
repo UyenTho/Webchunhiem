@@ -185,7 +185,7 @@ export default function App() {
           <StudentPortal
             student={loggedInStudent}
             onRefreshStudent={async () => {
-              const { data } = await supabase.from('students').select('*').eq('id', loggedInStudent.id).single();
+              const { data } = await supabase.from('students').select('*').eq('id', loggedInStudent.id).maybeSingle();
               if (data) setLoggedInStudent(data as Student);
             }}
           />
@@ -195,7 +195,7 @@ export default function App() {
   );
 }
 
-// ==================== 2. MÀN HÌNH ĐĂNG NHẬP (Mã Lớp 2 bước) ====================
+// ==================== 2. MÀN HÌNH ĐĂNG NHẬP (SỬA LỖI ĐĂNG NHẬP ADMIN / GV) ====================
 function LoginScreen({ onTeacherLogin, onStudentLogin, onAdminLogin, onForgotPassword, onRegister }: any) {
   const [role, setRole] = useState<'teacher' | 'student' | 'admin'>('teacher');
   const [email, setEmail] = useState('');
@@ -223,8 +223,10 @@ function LoginScreen({ onTeacherLogin, onStudentLogin, onAdminLogin, onForgotPas
     setError('');
     setLoading(true);
 
+    const inputEmail = email.trim().toLowerCase();
+
     const { data: authData, error: authErr } = await supabase.auth.signInWithPassword({
-      email: email.trim().toLowerCase(),
+      email: inputEmail,
       password: password,
     });
 
@@ -234,23 +236,30 @@ function LoginScreen({ onTeacherLogin, onStudentLogin, onAdminLogin, onForgotPas
       return;
     }
 
+    // Dùng maybeSingle() để tránh bị throw exception khi chưa có hồ sơ
     const { data: profile, error: profErr } = await supabase
       .from('teachers')
       .select('*')
       .eq('id', authData.user.id)
-      .single();
+      .maybeSingle();
 
     setLoading(false);
 
-    if (profErr || !profile) {
-      setError('Không tìm thấy hồ sơ giáo viên tương ứng.');
+    if (profErr) {
+      setError('Lỗi cơ sở dữ liệu: ' + profErr.message);
+      await supabase.auth.signOut();
+      return;
+    }
+
+    if (!profile) {
+      setError('Chưa tìm thấy hồ sơ tương ứng trong bảng teachers. Vui lòng liên hệ Admin.');
       await supabase.auth.signOut();
       return;
     }
 
     if (role === 'admin') {
       if (!profile.is_admin) {
-        setError('Tài khoản này không có quyền Quản trị viên.');
+        setError('Tài khoản này không có quyền Quản trị viên (is_admin = false).');
         await supabase.auth.signOut();
         return;
       }
@@ -542,7 +551,6 @@ function StudentPortal({ student, onRefreshStudent }: { student: Student; onRefr
   }, [student.id]);
 
   const fetchStudentData = async () => {
-    // Tối ưu hóa tải song song giúp load nhanh trên điện thoại
     const [annRes, feeRes, payRes, recRes] = await Promise.all([
       supabase.from('announcements').select('*').eq('teacher_id', student.teacher_id).order('created_date', { ascending: false }),
       supabase.from('fee_items').select('*').eq('teacher_id', student.teacher_id),
@@ -881,10 +889,8 @@ function ClassLeaderPortal({ student, onSwitchToStudentView }: { student: Studen
   const [recordType, setRecordType] = useState<'violation' | 'commendation'>('violation');
   const [content, setContent] = useState('');
 
-  // KHẮC PHỤC LỖI DÍNH SỐ 010: CHUYỂN DẠNG STRING ĐỂ KHÔNG BỊ KHỞI TẠO ĐÈ SỐ 0
   const [pointsStr, setPointsStr] = useState<string>('1');
 
-  // KHẮC PHỤC LỖI DÍNH SỐ ĐIỂM TỔ
   const [groupScores, setGroupScores] = useState({ group1: '100', group2: '100', group3: '100', group4: '100' });
   const [leaderNote, setLeaderNote] = useState('');
 
@@ -902,8 +908,6 @@ function ClassLeaderPortal({ student, onSwitchToStudentView }: { student: Studen
     if (!error && data) setClassStudents(data as Student[]);
   };
 
-  // Dùng RPC 'leader_add_record' để đảm bảo lớp trưởng chỉ có thể ghi nhận
-  // điểm cho học sinh trong đúng lớp của mình (kiểm tra ở phía server / RLS).
   const handleAddIndividualRecord = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedStudentId || !content.trim()) {
@@ -931,7 +935,6 @@ function ClassLeaderPortal({ student, onSwitchToStudentView }: { student: Studen
     }
   };
 
-  // Dùng RPC 'leader_submit_weekly_report' để gửi báo cáo thi đua tuần
   const handleSubmitWeeklySummary = async (e: React.FormEvent) => {
     e.preventDefault();
     const g1 = parseInt(groupScores.group1, 10) || 0;
@@ -970,7 +973,6 @@ function ClassLeaderPortal({ student, onSwitchToStudentView }: { student: Studen
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* MỤC 1: LỚP TRƯỞNG NHẬP VI PHẠM / KHEN THƯỞNG CÁ NHÂN */}
         <div className="bg-white p-5 rounded-2xl border shadow-sm space-y-4">
           <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2 border-b pb-2">
             <PlusCircle className="w-4 h-4 text-indigo-600" /> Nhập Vi Phạm / Khen Thưởng Cá Nhân
@@ -1012,7 +1014,6 @@ function ClassLeaderPortal({ student, onSwitchToStudentView }: { student: Studen
 
             <div>
               <label className="font-semibold block mb-1">Số điểm cộng / trừ (*):</label>
-              {/* SỬA DÙNG INPUT TYPE TEXT ĐỂ KHÔNG BỊ ĐÈ SỐ 0 VÀO TRƯỚC */}
               <input
                 type="text"
                 inputMode="numeric"
@@ -1029,7 +1030,6 @@ function ClassLeaderPortal({ student, onSwitchToStudentView }: { student: Studen
           </form>
         </div>
 
-        {/* MỤC 2: LỚP TRƯỞNG BÁO CÁO ĐIỂM THI ĐỦA TỔ TUẦN */}
         <div className="bg-white p-5 rounded-2xl border shadow-sm space-y-4">
           <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2 border-b pb-2">
             <Trophy className="w-4 h-4 text-amber-500" /> Báo Cáo Điểm Thi Đua Các Tổ Trong Tuần
@@ -1124,7 +1124,6 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
   }, [teacher.id]);
 
   const fetchData = async () => {
-    // Tải dữ liệu song song tối ưu tốc độ load
     const [stRes, fRes, aRes, rRes] = await Promise.all([
       supabase.from('students').select('*').eq('teacher_id', teacher.id).order('code', { ascending: true }),
       supabase.from('fee_items').select('*').eq('teacher_id', teacher.id),

@@ -1773,3 +1773,396 @@ function ResetPasswordScreen({ onDone }: { onDone: () => void }) {
     </div>
   );
 }
+// ============================================================
+// THAY ĐỔI 1 — Trong function App(), sửa cách gọi <LoginScreen />
+// (KHÔNG cần truyền teachers nữa)
+// ============================================================
+/*
+{currentView === 'login' && (
+  <LoginScreen
+    onTeacherLogin={(teacher: Teacher) => { setCurrentTeacher(teacher); setCurrentView('teacher'); }}
+    onStudentLogin={(student: Student) => {
+      setLoggedInStudent(student);
+      const r = (student.class_role || '').toLowerCase().trim();
+      if (r.includes('lớp trưởng') || r.includes('lop truong')) {
+        setCurrentView('class_leader_portal');
+      } else {
+        setCurrentView('student_portal');
+      }
+    }}
+    onAdminLogin={() => {
+      fetchTeachers();
+      setCurrentView('admin');
+    }}
+    onForgotPassword={() => setCurrentView('forgot_password')}
+    onRegister={() => setCurrentView('register_payment')}
+  />
+)}
+*/
+
+// ============================================================
+// THAY ĐỔI 2 — Thay TOÀN BỘ function LoginScreen cũ bằng đoạn này
+// ============================================================
+function LoginScreen({ onTeacherLogin, onStudentLogin, onAdminLogin, onForgotPassword, onRegister }: any) {
+  const [role, setRole] = useState<'teacher' | 'student' | 'admin'>('teacher');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+
+  // luồng học sinh: 2 bước
+  const [step, setStep] = useState<1 | 2>(1);
+  const [classCode, setClassCode] = useState('');
+  const [matchedTeacher, setMatchedTeacher] = useState<{ id: string; full_name: string; school: string } | null>(null);
+  const [studentCode, setStudentCode] = useState('');
+
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const resetStudentFlow = () => {
+    setStep(1);
+    setClassCode('');
+    setMatchedTeacher(null);
+    setStudentCode('');
+    setError('');
+  };
+
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setLoading(true);
+
+    const { data: authData, error: authErr } = await supabase.auth.signInWithPassword({
+      email: email.trim().toLowerCase(),
+      password: password,
+    });
+
+    if (authErr || !authData.user) {
+      setLoading(false);
+      setError('Email hoặc mật khẩu không đúng!');
+      return;
+    }
+
+    const { data: profile, error: profErr } = await supabase
+      .from('teachers')
+      .select('*')
+      .eq('id', authData.user.id)
+      .single();
+
+    setLoading(false);
+
+    if (profErr || !profile) {
+      setError('Không tìm thấy hồ sơ giáo viên tương ứng.');
+      await supabase.auth.signOut();
+      return;
+    }
+
+    if (role === 'admin') {
+      if (!profile.is_admin) {
+        setError('Tài khoản này không có quyền Quản trị viên.');
+        await supabase.auth.signOut();
+        return;
+      }
+      onAdminLogin();
+      return;
+    }
+
+    if (!profile.is_approved) {
+      setError('Tài khoản của thầy/cô ĐANG CHỜ ADMIN DUYỆT / CHƯA CHUYỂN TIỀN.');
+      await supabase.auth.signOut();
+      return;
+    }
+
+    onTeacherLogin(profile as Teacher);
+  };
+
+  const handleVerifyClassCode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    if (!classCode.trim()) return;
+    setLoading(true);
+
+    const { data, error: rpcErr } = await supabase.rpc('find_teacher_by_class_code', {
+      p_class_code: classCode.trim(),
+    });
+
+    setLoading(false);
+
+    if (rpcErr || !data || data.length === 0) {
+      setError('Mã Lớp không tồn tại hoặc chưa được kích hoạt. Vui lòng hỏi lại Giáo viên chủ nhiệm.');
+      return;
+    }
+
+    setMatchedTeacher(data[0]);
+    setStep(2);
+  };
+
+  const handleStudentLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    if (!studentCode.trim() || !matchedTeacher) return;
+    setLoading(true);
+
+    const { data, error: rpcErr } = await supabase.rpc('student_login', {
+      p_teacher_id: matchedTeacher.id,
+      p_code: studentCode.trim(),
+    });
+
+    setLoading(false);
+
+    if (rpcErr || !data || data.length === 0) {
+      setError('Mã Số Học Sinh không đúng trong lớp này!');
+      return;
+    }
+
+    onStudentLogin(data[0] as Student);
+  };
+
+  return (
+    <div className="min-h-screen flex items-center justify-center p-4">
+      <div className="bg-white max-w-md w-full rounded-2xl shadow-xl p-8 space-y-5">
+        <div className="text-center space-y-1">
+          <div className="bg-indigo-100 w-12 h-12 rounded-full flex items-center justify-center mx-auto text-indigo-600">
+            <Users className="w-6 h-6" />
+          </div>
+          <h2 className="text-xl font-bold text-slate-800">Đăng Nhập Hệ Thống</h2>
+        </div>
+
+        <div className="grid grid-cols-3 gap-1 bg-slate-100 p-1 rounded-xl text-xs font-bold">
+          <button type="button" onClick={() => { setRole('teacher'); setError(''); resetStudentFlow(); }} className={`py-2 rounded-lg transition ${role === 'teacher' ? 'bg-indigo-600 text-white shadow' : 'text-slate-600'}`}>Giáo Viên</button>
+          <button type="button" onClick={() => { setRole('student'); setError(''); resetStudentFlow(); }} className={`py-2 rounded-lg transition ${role === 'student' ? 'bg-indigo-600 text-white shadow' : 'text-slate-600'}`}>Học Sinh</button>
+          <button type="button" onClick={() => { setRole('admin'); setError(''); resetStudentFlow(); }} className={`py-2 rounded-lg transition ${role === 'admin' ? 'bg-purple-700 text-white shadow' : 'text-slate-600'}`}>🛡️ Admin</button>
+        </div>
+
+        {error && <p className="p-3 bg-rose-50 text-rose-700 text-xs rounded-xl border border-rose-200 font-medium">{error}</p>}
+
+        {(role === 'teacher' || role === 'admin') && (
+          <form onSubmit={handleLogin} className="space-y-4 text-xs">
+            <div>
+              <label className="font-semibold block mb-1">Email Gmail:</label>
+              <input type="email" required placeholder="teacher@gmail.com" value={email} onChange={e => setEmail(e.target.value)} className="w-full p-3 border rounded-xl text-sm" />
+            </div>
+            <div>
+              <label className="font-semibold block mb-1">Mật khẩu:</label>
+              <input type="password" required placeholder="••••••••" value={password} onChange={e => setPassword(e.target.value)} className="w-full p-3 border rounded-xl text-sm" />
+            </div>
+            <button type="submit" disabled={loading} className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-sm shadow transition">
+              {loading ? 'Đang xác thực...' : 'Đăng Nhập'}
+            </button>
+            {role === 'teacher' && (
+              <div className="flex justify-between text-xs pt-2">
+                <button type="button" onClick={onForgotPassword} className="text-indigo-600 hover:underline font-medium">Quên mật khẩu?</button>
+                <button type="button" onClick={onRegister} className="text-purple-700 font-bold hover:underline">Đăng ký mua bản quyền</button>
+              </div>
+            )}
+          </form>
+        )}
+
+        {role === 'student' && step === 1 && (
+          <form onSubmit={handleVerifyClassCode} className="space-y-4 text-xs">
+            <div>
+              <label className="font-semibold block mb-1">Bước 1: Nhập Mã Lớp (*):</label>
+              <input
+                type="text" required placeholder="VD: 10A1-UYENTHO"
+                value={classCode} onChange={e => setClassCode(e.target.value)}
+                className="w-full p-3 border rounded-xl text-sm uppercase font-mono"
+              />
+              <p className="text-[11px] text-indigo-600 mt-1.5 italic">* Mã Lớp do Giáo viên chủ nhiệm cung cấp riêng cho lớp của em.</p>
+            </div>
+            <button type="submit" disabled={loading} className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-sm shadow transition">
+              {loading ? 'Đang kiểm tra...' : 'Tiếp Tục →'}
+            </button>
+          </form>
+        )}
+
+        {role === 'student' && step === 2 && matchedTeacher && (
+          <form onSubmit={handleStudentLogin} className="space-y-4 text-xs">
+            <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-800 font-semibold">
+              ✓ Lớp của GV: {matchedTeacher.full_name} ({matchedTeacher.school || 'THPT'})
+              <button type="button" onClick={resetStudentFlow} className="block text-[11px] text-slate-500 underline mt-1 font-normal">Nhập sai Mã Lớp? Bấm để nhập lại</button>
+            </div>
+            <div>
+              <label className="font-semibold block mb-1">Bước 2: Nhập Mã Số Học Sinh (MSHS):</label>
+              <input
+                type="text" required placeholder="VD: HS001"
+                value={studentCode} onChange={e => setStudentCode(e.target.value)}
+                className="w-full p-3 border rounded-xl text-sm uppercase font-mono"
+              />
+            </div>
+            <button type="submit" disabled={loading} className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-sm shadow transition">
+              {loading ? 'Đang xác thực...' : 'Đăng Nhập'}
+            </button>
+          </form>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// THAY ĐỔI 3 — Thay TOÀN BỘ function RegisterWithPaymentScreen cũ
+// ============================================================
+function RegisterWithPaymentScreen({ onSuccess, onCancel }: any) {
+  const [fullName, setFullName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [phone, setPhone] = useState('');
+  const [school, setSchool] = useState('');
+  const [classCode, setClassCode] = useState('');
+  const [isSubmitted, setIsSubmitted] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (password.length < 6) {
+      alert('Mật khẩu phải có ít nhất 6 ký tự.');
+      return;
+    }
+    if (!classCode.trim()) {
+      alert('Vui lòng đặt Mã Lớp riêng cho lớp của thầy/cô (VD: 10A1-TENGV).');
+      return;
+    }
+    setLoading(true);
+    const inputEmail = email.trim().toLowerCase();
+    const inputClassCode = classCode.trim().toUpperCase();
+
+    const { data: existing } = await supabase.rpc('find_teacher_by_class_code', {
+      p_class_code: inputClassCode,
+    });
+    if (existing && existing.length > 0) {
+      setLoading(false);
+      alert('Mã Lớp này đã có người dùng. Vui lòng chọn Mã Lớp khác.');
+      return;
+    }
+
+    const { error } = await supabase.auth.signUp({
+      email: inputEmail,
+      password: password,
+      options: {
+        data: { full_name: fullName, phone: phone, school: school, class_code: inputClassCode }
+      }
+    });
+
+    setLoading(false);
+
+    if (error) {
+      const msg = error.message.toLowerCase();
+      if (msg.includes('already') || msg.includes('registered') || msg.includes('exists')) {
+        alert('Email Gmail này ĐÃ ĐƯỢC ĐĂNG KÝ! Vui lòng đăng nhập hoặc dùng "Quên mật khẩu".');
+      } else {
+        alert('Lỗi đăng ký: ' + error.message);
+      }
+      return;
+    }
+
+    setIsSubmitted(true);
+  };
+
+  return (
+    <div className="min-h-screen flex items-center justify-center p-4 text-xs">
+      <div className="bg-white max-w-lg w-full rounded-2xl shadow-xl p-8 space-y-5">
+        <h2 className="text-xl font-bold text-slate-800 text-center">Đăng Ký Bản Quyền SaaS</h2>
+
+        {!isSubmitted ? (
+          <form onSubmit={handleSubmit} className="space-y-3">
+            <div>
+              <label className="font-semibold block mb-1">Họ và tên Giáo viên (*):</label>
+              <input type="text" required placeholder="Thầy Nguyễn Văn A" value={fullName} onChange={e => setFullName(e.target.value)} className="w-full p-2.5 border rounded-xl" />
+            </div>
+            <div>
+              <label className="font-semibold block mb-1">Gmail đăng nhập (*):</label>
+              <input type="email" required placeholder="teacher@gmail.com" value={email} onChange={e => setEmail(e.target.value)} className="w-full p-2.5 border rounded-xl" />
+            </div>
+            <div>
+              <label className="font-semibold block mb-1">Tạo mật khẩu (*, tối thiểu 6 ký tự):</label>
+              <input type="password" required minLength={6} placeholder="••••••••" value={password} onChange={e => setPassword(e.target.value)} className="w-full p-2.5 border rounded-xl" />
+            </div>
+            <div>
+              <label className="font-semibold block mb-1">Số điện thoại (*):</label>
+              <input type="tel" required placeholder="0912345678" value={phone} onChange={e => setPhone(e.target.value)} className="w-full p-2.5 border rounded-xl" />
+            </div>
+            <div>
+              <label className="font-semibold block mb-1">Trường đang công tác:</label>
+              <input type="text" placeholder="THPT Chuyên..." value={school} onChange={e => setSchool(e.target.value)} className="w-full p-2.5 border rounded-xl" />
+            </div>
+            <div>
+              <label className="font-semibold block mb-1">Đặt Mã Lớp riêng (*, học sinh dùng mã này để đăng nhập):</label>
+              <input type="text" required placeholder="VD: 10A1-TENGV" value={classCode} onChange={e => setClassCode(e.target.value)} className="w-full p-2.5 border rounded-xl uppercase font-mono" />
+              <p className="text-[11px] text-slate-500 mt-1 italic">* Chỉ chia sẻ Mã Lớp cho học sinh trong lớp mình.</p>
+            </div>
+            <button type="submit" disabled={loading} className="w-full py-3 bg-purple-700 hover:bg-purple-800 text-white rounded-xl font-bold text-sm shadow transition">
+              {loading ? 'Đang khởi tạo...' : 'Đăng Ký'}
+            </button>
+          </form>
+        ) : (
+          <div className="space-y-4 text-center">
+            <div className="p-3.5 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl font-medium">
+              Đơn đăng ký đã ghi nhận! Vui lòng chuyển khoản/thanh toán học phí bản quyền cho Admin theo thông tin liên hệ, sau đó bấm nút bên dưới để báo Admin kích hoạt tài khoản.
+            </div>
+            <button onClick={onSuccess} className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow">
+              ✅ Tôi Đã Thanh Toán — Quay Lại Đăng Nhập
+            </button>
+          </div>
+        )}
+        <button onClick={onCancel} className="w-full text-center text-slate-400 hover:underline block">Hủy bỏ</button>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// THAY ĐỔI 4 — Trong function ClassLeaderPortal, thay 2 hàm sau
+// (giữ nguyên toàn bộ phần JSX/form, chỉ thay phần logic)
+// ============================================================
+/*
+const handleAddIndividualRecord = async (e: React.FormEvent) => {
+  e.preventDefault();
+  if (!selectedStudentId || !content.trim()) {
+    alert('Vui lòng chọn học sinh và nhập nội dung!');
+    return;
+  }
+  const parsedPoints = parseInt(pointsStr, 10) || 1;
+
+  const { error } = await supabase.rpc('leader_add_record', {
+    p_leader_student_id: student.id,
+    p_target_student_id: selectedStudentId,
+    p_week_number: weekNumber,
+    p_record_date: recordDate,
+    p_type: recordType,
+    p_content: content.trim(),
+    p_points: parsedPoints,
+  });
+
+  if (!error) {
+    alert('Đã lưu điểm vi phạm/khen thưởng thành công cho học sinh!');
+    setContent('');
+    setPointsStr('1');
+  } else {
+    alert('Lỗi khi lưu điểm: ' + error.message);
+  }
+};
+
+const handleSubmitWeeklySummary = async (e: React.FormEvent) => {
+  e.preventDefault();
+  const g1 = parseInt(groupScores.group1, 10) || 0;
+  const g2 = parseInt(groupScores.group2, 10) || 0;
+  const g3 = parseInt(groupScores.group3, 10) || 0;
+  const g4 = parseInt(groupScores.group4, 10) || 0;
+
+  const title = `[THI ĐUA LỚP TUẦN ${weekNumber}]`;
+  const summaryText = `📊 BÁO CÁO THI ĐUA TỔ TUẦN ${weekNumber}:\n- Tổ 1: ${g1}đ | Tổ 2: ${g2}đ\n- Tổ 3: ${g3}đ | Tổ 4: ${g4}đ\n\n📝 Ghi chú Lớp trưởng: ${leaderNote || 'Không có'}`;
+
+  const { error } = await supabase.rpc('leader_submit_weekly_report', {
+    p_leader_student_id: student.id,
+    p_week_number: weekNumber,
+    p_title: title,
+    p_content: summaryText,
+  });
+
+  if (!error) {
+    alert('Đã gửi báo cáo thi đua tuần tới Giáo viên chủ nhiệm!');
+    setLeaderNote('');
+  } else {
+    alert('Lỗi nộp báo cáo: ' + error.message);
+  }
+};
+*/
+

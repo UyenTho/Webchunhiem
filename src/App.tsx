@@ -582,7 +582,7 @@ function StudentPortal({ student, onRefreshStudent }: { student: Student; onRefr
 
   const fetchStudentData = async () => {
     const [annRes, feeRes, payRes, recRes] = await Promise.all([
-      supabase.from('announcements').select('*').eq('teacher_id', student.teacher_id).order('created_date', { ascending: false }),
+      supabase.from('announcements').select('*').eq('teacher_id', student.teacher_id).order('created_date', { ascending: false }).order('id', { ascending: false }),
       supabase.from('fee_items').select('*').eq('teacher_id', student.teacher_id),
       supabase.from('fee_payments').select('*').eq('student_id', student.id),
       supabase.from('student_records').select('*').eq('student_id', student.id).order('week_number', { ascending: false })
@@ -592,6 +592,28 @@ function StudentPortal({ student, onRefreshStudent }: { student: Student; onRefr
     if (feeRes.data) setFeeItems(feeRes.data as FeeItem[]);
     if (payRes.data) setFeePayments(payRes.data as FeePayment[]);
     if (recRes.data) setRecords(recRes.data as StudentRecord[]);
+  };
+
+  // Lớp trưởng có thể gửi lại báo cáo thi đua tuần nhiều lần (mỗi lần gửi tạo 1 dòng thông báo mới).
+  // Học sinh chỉ cần xem bản MỚI NHẤT của mỗi tuần (đã bao gồm cả điểm tổ và Ghi chú Lớp trưởng mới nhất),
+  // nên ở đây lọc bỏ các bản báo cáo cũ hơn của cùng 1 tuần thi đua, chỉ giữ lại 1 bản duy nhất/tuần.
+  // Danh sách "announcements" đã được sắp xếp mới nhất lên đầu (order theo created_date rồi id, giảm dần),
+  // nên chỉ cần giữ lần xuất hiện ĐẦU TIÊN của mỗi tuần và bỏ qua các lần xuất hiện sau.
+  const getDisplayAnnouncements = (list: Announcement[]) => {
+    const seenWeeks = new Set<string>();
+    const result: Announcement[] = [];
+    for (const a of list) {
+      const weeklyReportMatch = a.title.match(/^\[THI ĐUA LỚP TUẦN (\d+)\]$/);
+      if (weeklyReportMatch) {
+        const weekKey = weeklyReportMatch[1];
+        if (seenWeeks.has(weekKey)) {
+          continue; // Đã có bản mới hơn của tuần này rồi, bỏ qua bản cũ
+        }
+        seenWeeks.add(weekKey);
+      }
+      result.push(a);
+    }
+    return result;
   };
 
   const handleSaveSurvey = async (e: React.FormEvent) => {
@@ -888,23 +910,26 @@ function StudentPortal({ student, onRefreshStudent }: { student: Student; onRefr
         <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2 border-b pb-2">
           <Bell className="w-4.5 h-4.5 text-indigo-600" /> Thông Báo & Dặn Dò Từ Giáo Viên Chủ Nhiệm
         </h2>
-        {announcements.length === 0 ? (
-          <p className="text-slate-400 italic">Chưa có thông báo nào từ Giáo viên.</p>
-        ) : (
-          <div className="space-y-3">
-            {announcements.map((a: Announcement) => (
-              <div key={a.id} className={`p-3.5 rounded-xl border ${a.important ? 'bg-amber-50/60 border-amber-200' : 'bg-slate-50 border-slate-200'} space-y-1`}>
-                <div className="flex justify-between items-center">
-                  <span className="font-bold text-slate-800 text-xs flex items-center gap-1">
-                    {a.important && <AlertCircle className="w-3.5 h-3.5 text-amber-600" />} {a.title}
-                  </span>
-                  <span className="text-[10px] text-slate-400">{a.created_date}</span>
+        {(() => {
+          const displayAnnouncements = getDisplayAnnouncements(announcements);
+          return displayAnnouncements.length === 0 ? (
+            <p className="text-slate-400 italic">Chưa có thông báo nào từ Giáo viên.</p>
+          ) : (
+            <div className="space-y-3">
+              {displayAnnouncements.map((a: Announcement) => (
+                <div key={a.id} className={`p-3.5 rounded-xl border ${a.important ? 'bg-amber-50/60 border-amber-200' : 'bg-slate-50 border-slate-200'} space-y-1`}>
+                  <div className="flex justify-between items-center">
+                    <span className="font-bold text-slate-800 text-xs flex items-center gap-1">
+                      {a.important && <AlertCircle className="w-3.5 h-3.5 text-amber-600" />} {a.title}
+                    </span>
+                    <span className="text-[10px] text-slate-400">{a.created_date}</span>
+                  </div>
+                  <p className="text-slate-600 whitespace-pre-line leading-relaxed">{a.content}</p>
                 </div>
-                <p className="text-slate-600 whitespace-pre-line leading-relaxed">{a.content}</p>
-              </div>
-            ))}
-          </div>
-        )}
+              ))}
+            </div>
+          );
+        })()}
       </div>
     </div>
   );

@@ -69,6 +69,38 @@ type ViewType =
   | 'login' | 'forgot_password' | 'reset_password' | 'register_payment'
   | 'admin' | 'teacher' | 'student_portal' | 'class_leader_portal';
 
+// ==================== BẢNG QUY ĐỊNH ĐIỂM THI ĐUA ====================
+// Đồng bộ với Bảng Nội Quy Thi Đua hiển thị cho học sinh (mục II và III trong StudentPortal).
+// Lớp trưởng sẽ CHỌN nội dung từ danh sách này, điểm sẽ tự động điền theo đúng quy định,
+// tránh trường hợp nhập tay sai lệch điểm so với nội quy lớp.
+const COMPETITION_RULES: { type: 'violation' | 'commendation'; content: string; points: number }[] = [
+  // ==== II. BẢNG CỘNG ĐIỂM ====
+  { type: 'commendation', content: 'Đạt điểm 10 trong bài kiểm tra (Miệng, 15 phút, Giữa kỳ, Cuối kỳ)', points: 3 },
+  { type: 'commendation', content: 'Đạt điểm 9 trong bài kiểm tra (Miệng, 15 phút, Giữa kỳ, Cuối kỳ)', points: 2 },
+  { type: 'commendation', content: 'Đạt giải Học sinh giỏi / KHKT / Thể thao cấp Trường (hoặc tương đương)', points: 5 },
+  { type: 'commendation', content: 'Đạt giải Học sinh giỏi / KHKT cấp Tỉnh / Thành phố trở lên', points: 10 },
+  { type: 'commendation', content: 'Ban cán sự lớp (Lớp trưởng, Lớp phó, Cờ đỏ) hoàn thành xuất sắc nhiệm vụ', points: 5 },
+  { type: 'commendation', content: 'Nhặt được của rơi trả lại người mất / Hành động dũng cảm giúp đỡ cộng đồng', points: 5 },
+  // ==== III. BẢNG TRỪ ĐIỂM HÀNG TUẦN ====
+  { type: 'violation', content: 'Đi học muộn (sau tiếng trống vào lớp / giờ truy bài)', points: 2 },
+  { type: 'violation', content: 'Bỏ giờ truy bài 15 phút đầu giờ', points: 3 },
+  { type: 'violation', content: 'Nghỉ học không lý do (nghỉ chui)', points: 10 },
+  { type: 'violation', content: 'Trốn tiết / Trốn học giữa giờ', points: 15 },
+  { type: 'violation', content: 'Không làm bài tập về nhà / Không chuẩn bị bài theo yêu cầu GVBM', points: 3 },
+  { type: 'violation', content: 'Không mang sách vở, dụng cụ học tập theo thời khóa biểu', points: 2 },
+  { type: 'violation', content: 'Mất trật tự, làm việc riêng, ngủ gật trong giờ học', points: 2 },
+  { type: 'violation', content: 'Sử dụng điện thoại di động khi chưa có sự cho phép của giáo viên', points: 5 },
+  { type: 'violation', content: 'Gian lận trong kiểm tra, thi cử (quay cóp, sử dụng tài liệu)', points: 20 },
+  { type: 'violation', content: 'Sai đồng phục, không đeo thẻ học sinh, đi dép lê không quai', points: 2 },
+  { type: 'violation', content: 'Nhuộm tóc màu sáng, nhuộm Highlight, nam để tóc quá dài', points: 5 },
+  { type: 'violation', content: 'Trang điểm đậm, sơn móng tay/móng chân màu nổi bật', points: 3 },
+  { type: 'violation', content: 'Hút thuốc lá, thuốc lá điện tử trong trường (hoặc vi phạm ATGT)', points: 20 },
+  { type: 'violation', content: 'Bỏ trực nhật / Trực nhật sơ sài, không đổ rác đúng quy định', points: 5 },
+  { type: 'violation', content: 'Xả rác bừa bãi trong lớp hoặc khuôn viên trường', points: 3 },
+  { type: 'violation', content: 'Nói tục, chửi thề, gây mất đoàn kết nội bộ lớp', points: 5 },
+  { type: 'violation', content: 'Mang đồ ăn, nước ngọt vào sử dụng trong giờ học', points: 2 },
+];
+
 export default function App() {
   const [currentView, setCurrentView] = useState<ViewType>('login');
 
@@ -889,6 +921,10 @@ function ClassLeaderPortal({ student, onSwitchToStudentView }: { student: Studen
 
   const [pointsStr, setPointsStr] = useState<string>('1');
 
+  // Khi true: lớp trưởng chọn "Khác" và tự nhập nội dung + điểm.
+  // Khi false: nội dung + điểm được lấy tự động từ COMPETITION_RULES theo lựa chọn dropdown.
+  const [useCustomContent, setUseCustomContent] = useState(false);
+
   const [groupScores, setGroupScores] = useState({ group1: '100', group2: '100', group3: '100', group4: '100' });
   const [leaderNote, setLeaderNote] = useState('');
 
@@ -904,6 +940,20 @@ function ClassLeaderPortal({ student, onSwitchToStudentView }: { student: Studen
       .order('code', { ascending: true });
 
     if (!error && data) setClassStudents(data as Student[]);
+  };
+
+  // Xử lý khi lớp trưởng chọn 1 nội dung trong dropdown quy định điểm
+  const handleSelectRuleContent = (value: string) => {
+    if (value === '__custom__') {
+      setUseCustomContent(true);
+      setContent('');
+      setPointsStr('1');
+      return;
+    }
+    const rule = COMPETITION_RULES.find(r => r.type === recordType && r.content === value);
+    setUseCustomContent(false);
+    setContent(value);
+    setPointsStr(String(rule?.points ?? 1));
   };
 
   const handleAddIndividualRecord = async (e: React.FormEvent) => {
@@ -928,6 +978,7 @@ function ClassLeaderPortal({ student, onSwitchToStudentView }: { student: Studen
       alert('Đã lưu điểm vi phạm/khen thưởng thành công cho học sinh!');
       setContent('');
       setPointsStr('1');
+      setUseCustomContent(false);
     } else {
       alert('Lỗi khi lưu điểm: ' + error.message);
     }
@@ -1000,15 +1051,51 @@ function ClassLeaderPortal({ student, onSwitchToStudentView }: { student: Studen
             <div>
               <label className="font-semibold block mb-1">Loại Ghi Nhận (*):</label>
               <div className="grid grid-cols-2 gap-2">
-                <button type="button" onClick={() => setRecordType('violation')} className={`py-2 rounded-xl font-bold transition ${recordType === 'violation' ? 'bg-rose-600 text-white shadow' : 'bg-slate-100 text-slate-600'}`}>⚠️ Vi Phạm</button>
-                <button type="button" onClick={() => setRecordType('commendation')} className={`py-2 rounded-xl font-bold transition ${recordType === 'commendation' ? 'bg-emerald-600 text-white shadow' : 'bg-slate-100 text-slate-600'}`}>🌟 Khen Thưởng</button>
+                <button
+                  type="button"
+                  onClick={() => { setRecordType('violation'); setContent(''); setPointsStr('1'); setUseCustomContent(false); }}
+                  className={`py-2 rounded-xl font-bold transition ${recordType === 'violation' ? 'bg-rose-600 text-white shadow' : 'bg-slate-100 text-slate-600'}`}
+                >⚠️ Vi Phạm</button>
+                <button
+                  type="button"
+                  onClick={() => { setRecordType('commendation'); setContent(''); setPointsStr('1'); setUseCustomContent(false); }}
+                  className={`py-2 rounded-xl font-bold transition ${recordType === 'commendation' ? 'bg-emerald-600 text-white shadow' : 'bg-slate-100 text-slate-600'}`}
+                >🌟 Khen Thưởng</button>
               </div>
             </div>
 
             <div>
-              <label className="font-semibold block mb-1">Nội dung chi tiết vi phạm / khen thưởng:</label>
-              <input type="text" placeholder="VD: Đi học muộn 10 phút, Đạt điểm 10 kiểm tra Miệng..." value={content} onChange={e => setContent(e.target.value)} className="w-full p-2 border rounded-xl" required />
+              <label className="font-semibold block mb-1">Chọn Nội Dung Theo Nội Quy Thi Đua (*):</label>
+              <select
+                value={useCustomContent ? '__custom__' : content}
+                onChange={(e) => handleSelectRuleContent(e.target.value)}
+                className="w-full p-2 border rounded-xl"
+                required
+              >
+                <option value="">-- Chọn nội dung theo nội quy --</option>
+                {COMPETITION_RULES.filter(r => r.type === recordType).map((r, idx) => (
+                  <option key={idx} value={r.content}>
+                    {r.content} ({r.type === 'violation' ? '-' : '+'}{r.points}đ)
+                  </option>
+                ))}
+                <option value="__custom__">✏️ Khác (Tự nhập nội dung, tự nhập điểm)</option>
+              </select>
+              <p className="text-[11px] text-slate-500 mt-1 italic">* Điểm sẽ tự động điền theo đúng Nội Quy Thi Đua của lớp khi chọn nội dung có sẵn.</p>
             </div>
+
+            {useCustomContent && (
+              <div>
+                <label className="font-semibold block mb-1">Nội dung tự nhập:</label>
+                <input
+                  type="text"
+                  placeholder="VD: Đi học muộn 10 phút, Đạt điểm 10 kiểm tra Miệng..."
+                  value={content}
+                  onChange={e => setContent(e.target.value)}
+                  className="w-full p-2 border rounded-xl"
+                  required
+                />
+              </div>
+            )}
 
             <div>
               <label className="font-semibold block mb-1">Số điểm cộng / trừ (*):</label>
@@ -1017,9 +1104,13 @@ function ClassLeaderPortal({ student, onSwitchToStudentView }: { student: Studen
                 inputMode="numeric"
                 value={pointsStr}
                 onChange={e => setPointsStr(e.target.value.replace(/[^0-9]/g, ''))}
-                className="w-full p-2 border rounded-xl font-bold text-indigo-700"
+                className={`w-full p-2 border rounded-xl font-bold text-indigo-700 ${!useCustomContent ? 'bg-slate-100' : ''}`}
+                readOnly={!useCustomContent}
                 required
               />
+              {!useCustomContent && content && (
+                <p className="text-[11px] text-slate-500 mt-1 italic">* Điểm tự động theo Nội Quy Thi Đua — chọn "Khác" ở trên nếu cần nhập tay.</p>
+              )}
             </div>
 
             <button type="submit" className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow transition">

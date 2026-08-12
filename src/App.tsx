@@ -195,13 +195,12 @@ export default function App() {
   );
 }
 
-// ==================== 2. MÀN HÌNH ĐĂNG NHẬP (SỬA LỖI ĐĂNG NHẬP ADMIN / GV) ====================
+// ==================== 2. MÀN HÌNH ĐĂNG NHẬP ====================
 function LoginScreen({ onTeacherLogin, onStudentLogin, onAdminLogin, onForgotPassword, onRegister }: any) {
   const [role, setRole] = useState<'teacher' | 'student' | 'admin'>('teacher');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
 
-  // luồng học sinh: 2 bước
   const [step, setStep] = useState<1 | 2>(1);
   const [classCode, setClassCode] = useState('');
   const [matchedTeacher, setMatchedTeacher] = useState<{ id: string; full_name: string; school: string } | null>(null);
@@ -236,7 +235,6 @@ function LoginScreen({ onTeacherLogin, onStudentLogin, onAdminLogin, onForgotPas
       return;
     }
 
-    // Dùng maybeSingle() để tránh bị throw exception khi chưa có hồ sơ
     const { data: profile, error: profErr } = await supabase
       .from('teachers')
       .select('*')
@@ -399,7 +397,7 @@ function LoginScreen({ onTeacherLogin, onStudentLogin, onAdminLogin, onForgotPas
   );
 }
 
-// ==================== 2b. MÀN HÌNH ĐĂNG KÝ VÀ THANH TOÁN (kèm Mã Lớp) ====================
+// ==================== 2b. MÀN HÌNH ĐĂNG KÝ VÀ THANH TOÁN ====================
 function RegisterWithPaymentScreen({ onSuccess, onCancel }: any) {
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
@@ -1145,6 +1143,22 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
     if (rRes.data) setStudentRecords(rRes.data as StudentRecord[]);
   };
 
+  // Hàm thay đổi chức vụ trực tiếp cho học sinh
+  const handleUpdateStudentRole = async (studentId: string, newRole: string) => {
+    const { error } = await supabase
+      .from('students')
+      .update({ class_role: newRole })
+      .eq('id', studentId);
+
+    if (error) {
+      alert('Lỗi cập nhật chức vụ: ' + error.message);
+    } else {
+      setStudents(prev =>
+        prev.map(s => (s.id === studentId ? { ...s, class_role: newRole } : s))
+      );
+    }
+  };
+
   const handleAddStudent = async (e: React.FormEvent) => {
     e.preventDefault();
     const { error } = await supabase.from('students').insert([
@@ -1371,7 +1385,19 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
                     <td className="p-3 border-r font-mono font-bold text-indigo-700">{s.code}</td>
                     <td className="p-3 border-r font-bold">{s.full_name}</td>
                     <td className="p-3 border-r text-center">{s.dob || 'Chưa nhập'}</td>
-                    <td className="p-3 border-r text-center font-semibold text-purple-700">{s.class_role || 'Học sinh'}</td>
+                    {/* CHO PHÉP GIÁO VIÊN CHỌN ĐỔI CHỨC VỤ TRỰC TIẾP */}
+                    <td className="p-3 border-r text-center">
+                      <select
+                        value={s.class_role || 'Học sinh'}
+                        onChange={(e) => handleUpdateStudentRole(s.id, e.target.value)}
+                        className="p-1.5 border border-purple-200 bg-purple-50 text-purple-800 font-bold rounded-xl text-xs focus:ring-2 focus:ring-purple-400 outline-none"
+                      >
+                        <option value="Học sinh">Học sinh</option>
+                        <option value="Lớp trưởng">Lớp trưởng</option>
+                        <option value="Lớp phó">Lớp phó</option>
+                        <option value="Tổ trưởng">Tổ trưởng</option>
+                      </select>
+                    </td>
                     <td className="p-3 border-r text-center">
                       {s.survey_completed ? (
                         <button onClick={() => setSelectedStudentForModal(s)} className="bg-emerald-100 text-emerald-800 px-2.5 py-1 rounded-full font-bold hover:bg-emerald-200">

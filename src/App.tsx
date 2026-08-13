@@ -1561,6 +1561,36 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
     }
   };
 
+  // Xóa 1 thông báo (bao gồm cả các báo cáo thi đua tuần do Lớp trưởng cũ đã gửi trước đây,
+  // ví dụ "[THI ĐUA LỚP TUẦN 0]", "[THI ĐUA LỚP TUẦN 1]"...). Đây là nơi duy nhất GVCN có
+  // quyền dọn dẹp thông báo cũ/sai — học sinh và Lớp trưởng không có quyền xóa thông báo.
+  const handleDeleteAnnouncement = async (id: string) => {
+    if (confirm('Xóa thông báo này? Học sinh sẽ không còn thấy thông báo/báo cáo thi đua này nữa.')) {
+      const { error } = await supabase.from('announcements').delete().eq('id', id);
+      if (error) alert('Lỗi khi xóa thông báo: ' + error.message);
+      else fetchData();
+    }
+  };
+
+  // Xóa HÀNG LOẠT các báo cáo thi đua tuần cũ (dạng tiêu đề "[THI ĐUA LỚP TUẦN N]") — hữu ích
+  // khi GVCN đã đổi Lớp trưởng mới và muốn dọn sạch các báo cáo do Lớp trưởng cũ gửi trước đó.
+  // Các thông báo thường (không theo mẫu báo cáo tuần) sẽ KHÔNG bị ảnh hưởng.
+  const handleDeleteAllWeeklyReports = async () => {
+    const weeklyReportIds = announcements
+      .filter(a => /^\[THI ĐUA LỚP TUẦN \d+\]$/.test(a.title))
+      .map(a => a.id);
+
+    if (weeklyReportIds.length === 0) {
+      alert('Không có báo cáo thi đua tuần nào để xóa.');
+      return;
+    }
+    if (!confirm(`Xóa toàn bộ ${weeklyReportIds.length} báo cáo thi đua tuần cũ? Các thông báo khác sẽ được giữ nguyên.`)) return;
+
+    const { error } = await supabase.from('announcements').delete().in('id', weeklyReportIds);
+    if (error) alert('Lỗi khi xóa: ' + error.message);
+    else fetchData();
+  };
+
   const handleDeleteStudent = async (id: string) => {
     if (confirm('Xóa học sinh này khỏi danh sách lớp?')) {
       await supabase.from('students').delete().eq('id', id);
@@ -1946,7 +1976,16 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
       {activeTab === 'announcements' && (
         <div className="space-y-6">
           <div className="bg-white p-5 rounded-2xl border shadow-sm">
-            <h2 className="font-bold text-slate-800 text-sm mb-3">Tạo Thông Báo Mới Gửi Lớp</h2>
+            <div className="flex justify-between items-center flex-wrap gap-3 mb-3">
+              <h2 className="font-bold text-slate-800 text-sm">Tạo Thông Báo Mới Gửi Lớp</h2>
+              <button
+                type="button"
+                onClick={handleDeleteAllWeeklyReports}
+                className="bg-rose-50 text-rose-700 border border-rose-200 px-3 py-1.5 rounded-xl font-bold hover:bg-rose-100 flex items-center gap-1.5"
+              >
+                <Trash2 className="w-3.5 h-3.5" /> Xóa Tất Cả Báo Cáo Thi Đua Tuần Cũ
+              </button>
+            </div>
             <form onSubmit={handleAddAnnouncement} className="space-y-3">
               <input type="text" required placeholder="Tiêu đề thông báo..." value={annTitle} onChange={e => setAnnTitle(e.target.value)} className="w-full p-2 border rounded-xl" />
               <textarea rows={3} required placeholder="Nội dung chi tiết..." value={annContent} onChange={e => setAnnContent(e.target.value)} className="w-full p-2 border rounded-xl" />
@@ -1959,15 +1998,28 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
           </div>
 
           <div className="space-y-3">
-            {announcements.map((a: Announcement) => (
-              <div key={a.id} className="bg-white p-4 rounded-2xl border shadow-sm space-y-1">
-                <div className="flex justify-between items-center">
-                  <span className="font-bold text-sm text-slate-800">{a.title}</span>
-                  <span className="text-[10px] text-slate-400">{a.created_date}</span>
+            {announcements.length === 0 ? (
+              <p className="text-slate-400 italic p-3 bg-white rounded-2xl border">Chưa có thông báo nào.</p>
+            ) : (
+              announcements.map((a: Announcement) => (
+                <div key={a.id} className="bg-white p-4 rounded-2xl border shadow-sm space-y-1">
+                  <div className="flex justify-between items-center gap-3">
+                    <span className="font-bold text-sm text-slate-800">{a.title}</span>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className="text-[10px] text-slate-400">{a.created_date}</span>
+                      <button
+                        onClick={() => handleDeleteAnnouncement(a.id)}
+                        title="Xóa thông báo này"
+                        className="p-1.5 text-rose-600 hover:bg-rose-50 rounded-lg"
+                      >
+                        <Trash2 className="w-4 h-4 inline" />
+                      </button>
+                    </div>
+                  </div>
+                  <p className="text-slate-600 whitespace-pre-line">{a.content}</p>
                 </div>
-                <p className="text-slate-600 whitespace-pre-line">{a.content}</p>
-              </div>
-            ))}
+              ))
+            )}
           </div>
         </div>
       )}

@@ -22,6 +22,7 @@ interface Student {
   teacher_id: string;
   code: string;
   full_name: string;
+  password?: string;
   dob?: string;
   class_role?: string;
   group_number?: number;
@@ -242,6 +243,7 @@ function LoginScreen({ onTeacherLogin, onStudentLogin, onAdminLogin, onForgotPas
   const [classCode, setClassCode] = useState('');
   const [matchedTeacher, setMatchedTeacher] = useState<{ id: string; full_name: string; school: string } | null>(null);
   const [studentCode, setStudentCode] = useState('');
+  const [studentPassword, setStudentPassword] = useState('');
 
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -251,6 +253,7 @@ function LoginScreen({ onTeacherLogin, onStudentLogin, onAdminLogin, onForgotPas
     setClassCode('');
     setMatchedTeacher(null);
     setStudentCode('');
+    setStudentPassword('');
     setError('');
   };
 
@@ -335,18 +338,23 @@ function LoginScreen({ onTeacherLogin, onStudentLogin, onAdminLogin, onForgotPas
   const handleStudentLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
-    if (!studentCode.trim() || !matchedTeacher) return;
+    if (!studentCode.trim() || !studentPassword.trim() || !matchedTeacher) return;
     setLoading(true);
 
+    // LƯU Ý QUAN TRỌNG: Hàm RPC "student_login" trong Supabase cần được cập nhật để
+    // nhận thêm tham số p_password và đối chiếu với cột "password" của học sinh
+    // (chỉ trả về kết quả khi MSHS VÀ Mật khẩu đều khớp). Nếu RPC hiện tại chưa hỗ
+    // trợ tham số này, cần sửa lại function trong Supabase (SQL Editor) tương ứng.
     const { data, error: rpcErr } = await supabase.rpc('student_login', {
       p_teacher_id: matchedTeacher.id,
       p_code: studentCode.trim(),
+      p_password: studentPassword.trim(),
     });
 
     setLoading(false);
 
     if (rpcErr || !data || data.length === 0) {
-      setError('Mã Số Học Sinh không đúng trong lớp này!');
+      setError('Mã Số Học Sinh hoặc Mật khẩu không đúng trong lớp này!');
       return;
     }
 
@@ -423,6 +431,15 @@ function LoginScreen({ onTeacherLogin, onStudentLogin, onAdminLogin, onForgotPas
                 value={studentCode} onChange={e => setStudentCode(e.target.value)}
                 className="w-full p-3 border rounded-xl text-sm uppercase font-mono"
               />
+            </div>
+            <div>
+              <label className="font-semibold block mb-1">Mật khẩu (*):</label>
+              <input
+                type="password" required placeholder="Do Giáo viên chủ nhiệm cấp"
+                value={studentPassword} onChange={e => setStudentPassword(e.target.value)}
+                className="w-full p-3 border rounded-xl text-sm"
+              />
+              <p className="text-[11px] text-slate-400 mt-1 italic">* Nếu chưa có mật khẩu hoặc quên mật khẩu, vui lòng liên hệ Giáo viên chủ nhiệm để được cấp lại.</p>
             </div>
             <button type="submit" disabled={loading} className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-sm shadow transition">
               {loading ? 'Đang xác thực...' : 'Đăng Nhập'}
@@ -1219,6 +1236,8 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [studentRecords, setStudentRecords] = useState<StudentRecord[]>([]);
   const [selectedStudentForModal, setSelectedStudentForModal] = useState<Student | null>(null);
+  const [editingStudent, setEditingStudent] = useState<Student | null>(null);
+  const [editForm, setEditForm] = useState({ code: '', full_name: '', dob: '', class_role: 'Học sinh', group_number: 1, password: '' });
   const [selectedWeek, setSelectedWeek] = useState<string>('all');
   const [selectedFeeForUnpaid, setSelectedFeeForUnpaid] = useState<string>('');
   const [importing, setImporting] = useState(false);
@@ -1227,6 +1246,7 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
   const [newStudentCode, setNewStudentCode] = useState('');
   const [newStudentName, setNewStudentName] = useState('');
   const [newStudentDob, setNewStudentDob] = useState('');
+  const [newStudentPassword, setNewStudentPassword] = useState('');
   const [newStudentRole, setNewStudentRole] = useState('Học sinh');
   const [newStudentGroup, setNewStudentGroup] = useState(1);
 
@@ -1344,6 +1364,7 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
         teacher_id: teacher.id,
         code: newStudentCode.trim().toUpperCase(),
         full_name: newStudentName,
+        password: newStudentPassword.trim(),
         dob: newStudentDob,
         class_role: newStudentRole,
         group_number: newStudentGroup
@@ -1352,9 +1373,53 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
 
     if (error) alert('Lỗi thêm học sinh: ' + error.message);
     else {
-      setNewStudentCode(''); setNewStudentName(''); setNewStudentDob('');
+      setNewStudentCode(''); setNewStudentName(''); setNewStudentDob(''); setNewStudentPassword('');
       fetchData();
     }
+  };
+
+  // Mở modal chỉnh sửa thông tin học sinh (dùng khi GV nhập sai Họ tên, Ngày sinh, MSHS...
+  // hoặc cần cấp/đổi lại Mật khẩu đăng nhập cho học sinh).
+  const handleOpenEditStudent = (s: Student) => {
+    setEditingStudent(s);
+    setEditForm({
+      code: s.code || '',
+      full_name: s.full_name || '',
+      dob: s.dob || '',
+      class_role: s.class_role || 'Học sinh',
+      group_number: s.group_number || 1,
+      password: '', // Để trống = không đổi mật khẩu hiện tại, chỉ nhập khi muốn cấp lại mật khẩu mới
+    });
+  };
+
+  const handleCloseEditStudent = () => {
+    setEditingStudent(null);
+  };
+
+  const handleSaveEditStudent = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingStudent) return;
+
+    const updatePayload: any = {
+      code: editForm.code.trim().toUpperCase(),
+      full_name: editForm.full_name.trim(),
+      dob: editForm.dob || null,
+      class_role: editForm.class_role,
+      group_number: editForm.group_number,
+    };
+    // Chỉ cập nhật mật khẩu nếu GV có nhập mật khẩu mới (để trống thì giữ nguyên mật khẩu cũ)
+    if (editForm.password.trim()) {
+      updatePayload.password = editForm.password.trim();
+    }
+
+    const { error } = await supabase.from('students').update(updatePayload).eq('id', editingStudent.id);
+    if (error) {
+      alert('Lỗi cập nhật thông tin học sinh: ' + error.message);
+      return;
+    }
+    alert('Đã cập nhật thông tin học sinh thành công!');
+    setEditingStudent(null);
+    fetchData();
   };
 
   const handleImportExcel = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1370,10 +1435,15 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
       const mapped = rows.map((r) => {
         let dob = r['Ngày sinh'] || r['DOB'] || '';
         if (dob instanceof Date) dob = dob.toISOString().slice(0, 10);
+        const code = String(r['MSHS'] || r['Mã số'] || '').trim().toUpperCase();
+        // Nếu file Excel không có cột Mật khẩu (hoặc để trống), mặc định lấy MSHS làm mật khẩu ban đầu
+        // — Giáo viên nên vào "Sửa" từng học sinh để đổi lại mật khẩu riêng cho bảo mật.
+        const password = String(r['Mật khẩu'] || r['Password'] || code || '').trim();
         return {
           teacher_id: teacher.id,
-          code: String(r['MSHS'] || r['Mã số'] || '').trim().toUpperCase(),
+          code,
           full_name: String(r['Họ và tên'] || r['Họ tên'] || '').trim(),
+          password,
           dob: dob || null,
           class_role: String(r['Chức vụ'] || 'Học sinh').trim() || 'Học sinh',
           group_number: Number(r['Tổ'] || r['Nhóm'] || 1) || 1,
@@ -1405,6 +1475,7 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
       'MSHS': s.code,
       'Họ và tên': s.full_name,
       'Ngày sinh': s.dob || '',
+      'Mật khẩu': s.password || '',
       'Chức vụ': s.class_role || 'Học sinh',
       'Tổ': s.group_number || 1,
       'Đã khảo sát': s.survey_completed ? 'Có' : 'Chưa',
@@ -1518,7 +1589,7 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
           <div className="bg-white p-5 rounded-2xl border shadow-sm flex justify-between items-center flex-wrap gap-3">
             <div>
               <h2 className="font-bold text-slate-800 text-sm">Nhập / Xuất Danh Sách Từ Excel</h2>
-              <p className="text-slate-500 text-[11px] mt-1">File Excel cần có cột: MSHS, Họ và tên, Ngày sinh, Chức vụ, Tổ.</p>
+              <p className="text-slate-500 text-[11px] mt-1">File Excel cần có cột: MSHS, Họ và tên, Ngày sinh, Chức vụ, Tổ. Cột "Mật khẩu" không bắt buộc — nếu bỏ trống, hệ thống tự lấy MSHS làm mật khẩu ban đầu.</p>
             </div>
             <div className="flex gap-2">
               <input ref={fileInputRef} type="file" accept=".xlsx,.xls" onChange={handleImportExcel} className="hidden" id="excel-import" />
@@ -1531,10 +1602,11 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
 
           <div className="bg-white p-5 rounded-2xl border shadow-sm">
             <h2 className="font-bold text-slate-800 text-sm mb-3">Thêm Học Sinh Mới Vào Lớp (Thủ công)</h2>
-            <form onSubmit={handleAddStudent} className="grid grid-cols-1 md:grid-cols-6 gap-3">
+            <form onSubmit={handleAddStudent} className="grid grid-cols-1 md:grid-cols-7 gap-3">
               <input type="text" required placeholder="MSHS (VD: HS001)" value={newStudentCode} onChange={e => setNewStudentCode(e.target.value)} className="p-2 border rounded-xl uppercase font-mono" />
               <input type="text" required placeholder="Họ và tên" value={newStudentName} onChange={e => setNewStudentName(e.target.value)} className="p-2 border rounded-xl" />
               <input type="date" required value={newStudentDob} onChange={e => setNewStudentDob(e.target.value)} className="p-2 border rounded-xl" />
+              <input type="text" required placeholder="Mật khẩu đăng nhập" value={newStudentPassword} onChange={e => setNewStudentPassword(e.target.value)} className="p-2 border rounded-xl font-mono" />
               <select value={newStudentRole} onChange={e => setNewStudentRole(e.target.value)} className="p-2 border rounded-xl">
                 {ROLES.map(role => <option key={role} value={role}>{role}</option>)}
               </select>
@@ -1580,8 +1652,11 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
                         <span className="text-slate-400 italic">Chưa nộp</span>
                       )}
                     </td>
-                    <td className="p-3 text-center">
-                      <button onClick={() => handleDeleteStudent(s.id)} className="p-1 text-rose-600 hover:bg-rose-50 rounded">
+                    <td className="p-3 text-center space-x-1">
+                      <button onClick={() => handleOpenEditStudent(s)} className="bg-indigo-50 text-indigo-700 border border-indigo-200 px-2.5 py-1 rounded-lg font-bold hover:bg-indigo-100">
+                        ✏️ Sửa
+                      </button>
+                      <button onClick={() => handleDeleteStudent(s.id)} className="p-1.5 text-rose-600 hover:bg-rose-50 rounded">
                         <Trash2 className="w-4 h-4 inline" />
                       </button>
                     </td>
@@ -1945,6 +2020,88 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
             ) : (
               <p className="text-slate-400 italic">Học sinh chưa hoàn thành phiếu khảo sát.</p>
             )}
+          </div>
+        </div>
+      )}
+
+      {editingStudent && (
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-white max-w-lg w-full rounded-2xl shadow-2xl p-6 space-y-4 text-xs">
+            <div className="flex justify-between items-center border-b pb-3">
+              <h2 className="text-base font-bold text-indigo-900">✏️ Sửa Thông Tin Học Sinh</h2>
+              <button onClick={handleCloseEditStudent} className="text-slate-400 hover:text-slate-600 font-bold text-lg">✕</button>
+            </div>
+
+            <form onSubmit={handleSaveEditStudent} className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="font-semibold block mb-1">MSHS (*):</label>
+                  <input
+                    type="text" required value={editForm.code}
+                    onChange={e => setEditForm({ ...editForm, code: e.target.value })}
+                    className="w-full p-2 border rounded-xl uppercase font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="font-semibold block mb-1">Ngày sinh:</label>
+                  <input
+                    type="date" value={editForm.dob}
+                    onChange={e => setEditForm({ ...editForm, dob: e.target.value })}
+                    className="w-full p-2 border rounded-xl"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="font-semibold block mb-1">Họ và tên (*):</label>
+                <input
+                  type="text" required value={editForm.full_name}
+                  onChange={e => setEditForm({ ...editForm, full_name: e.target.value })}
+                  className="w-full p-2 border rounded-xl"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="font-semibold block mb-1">Chức vụ:</label>
+                  <select
+                    value={editForm.class_role}
+                    onChange={e => setEditForm({ ...editForm, class_role: e.target.value })}
+                    className="w-full p-2 border rounded-xl"
+                  >
+                    {ROLES.map(role => <option key={role} value={role}>{role}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="font-semibold block mb-1">Tổ (1-4):</label>
+                  <input
+                    type="number" min="1" max="4" value={editForm.group_number}
+                    onChange={e => setEditForm({ ...editForm, group_number: Number(e.target.value) })}
+                    className="w-full p-2 border rounded-xl"
+                  />
+                </div>
+              </div>
+
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl space-y-1.5">
+                <label className="font-bold text-amber-800 block">🔒 Cấp lại / Đổi Mật khẩu đăng nhập:</label>
+                <input
+                  type="text" placeholder="Để trống nếu không muốn đổi mật khẩu hiện tại"
+                  value={editForm.password}
+                  onChange={e => setEditForm({ ...editForm, password: e.target.value })}
+                  className="w-full p-2 border rounded-xl font-mono bg-white"
+                />
+                <p className="text-[11px] text-amber-700 italic">* Chỉ nhập khi cần cấp mật khẩu mới cho học sinh (VD: học sinh quên mật khẩu). Để trống sẽ giữ nguyên mật khẩu cũ.</p>
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <button type="button" onClick={handleCloseEditStudent} className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition">
+                  Hủy
+                </button>
+                <button type="submit" className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow transition">
+                  Lưu Thay Đổi
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

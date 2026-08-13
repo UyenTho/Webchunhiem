@@ -567,6 +567,9 @@ function StudentPortal({ student, onRefreshStudent }: { student: Student; onRefr
   const [feePayments, setFeePayments] = useState<FeePayment[]>([]);
   const [records, setRecords] = useState<StudentRecord[]>([]);
   const [showRules, setShowRules] = useState(false);
+  const [showChangePassword, setShowChangePassword] = useState(false);
+  const [pwForm, setPwForm] = useState({ current: '', next: '', confirm: '' });
+  const [pwSaving, setPwSaving] = useState(false);
 
   const [surveyData, setSurveyData] = useState({
     p_fullname: student.full_name || '',
@@ -653,6 +656,47 @@ function StudentPortal({ student, onRefreshStudent }: { student: Student; onRefr
     }
   };
 
+  // Cho phép học sinh TỰ đổi mật khẩu đăng nhập của chính mình (bảo mật hơn khi không phải
+  // nhờ Giáo viên cấp lại). Yêu cầu nhập đúng mật khẩu hiện tại trước khi đổi.
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (!pwForm.current.trim() || !pwForm.next.trim() || !pwForm.confirm.trim()) {
+      alert('Vui lòng nhập đầy đủ Mật khẩu hiện tại, Mật khẩu mới và Nhập lại mật khẩu mới.');
+      return;
+    }
+    if (pwForm.current !== (student.password || '')) {
+      alert('Mật khẩu hiện tại không đúng!');
+      return;
+    }
+    if (pwForm.next.length < 4) {
+      alert('Mật khẩu mới phải có ít nhất 4 ký tự.');
+      return;
+    }
+    if (pwForm.next !== pwForm.confirm) {
+      alert('Mật khẩu mới và Nhập lại mật khẩu mới không khớp!');
+      return;
+    }
+    if (pwForm.next === pwForm.current) {
+      alert('Mật khẩu mới phải khác mật khẩu hiện tại.');
+      return;
+    }
+
+    setPwSaving(true);
+    const { error } = await supabase.from('students').update({ password: pwForm.next.trim() }).eq('id', student.id);
+    setPwSaving(false);
+
+    if (error) {
+      alert('Lỗi đổi mật khẩu: ' + error.message);
+      return;
+    }
+
+    alert('Đổi mật khẩu thành công! Hãy ghi nhớ mật khẩu mới cho lần đăng nhập sau.');
+    setPwForm({ current: '', next: '', confirm: '' });
+    setShowChangePassword(false);
+    onRefreshStudent();
+  };
+
   const totalDeduction = (records || []).filter(r => r.type === 'violation').reduce((sum, r) => sum + Number(r.points || 0), 0);
   const totalBonus = (records || []).filter(r => r.type === 'commendation').reduce((sum, r) => sum + Number(r.points || 0), 0);
   const currentTotalScore = 100 - totalDeduction + totalBonus;
@@ -670,11 +714,52 @@ function StudentPortal({ student, onRefreshStudent }: { student: Student; onRefr
             <span className="text-2xl font-black text-indigo-600">{currentTotalScore}</span>
             <span className="text-[10px] block text-slate-400 font-bold uppercase">ĐIỂM RÈN LUYỆN</span>
           </div>
+          <button onClick={() => setShowChangePassword(!showChangePassword)} className="bg-indigo-50 text-indigo-800 border border-indigo-300 px-3 py-2 rounded-xl font-bold flex items-center gap-1.5 hover:bg-indigo-100">
+            <ShieldAlert className="w-4 h-4 text-indigo-600" /> {showChangePassword ? 'Đóng' : 'Đổi Mật Khẩu'}
+          </button>
           <button onClick={() => setShowRules(!showRules)} className="bg-amber-50 text-amber-800 border border-amber-300 px-3 py-2 rounded-xl font-bold flex items-center gap-1.5 hover:bg-amber-100">
             <BookOpen className="w-4 h-4 text-amber-600" /> {showRules ? 'Ẩn Nội Quy' : 'Xem Nội Quy Thi Đua'}
           </button>
         </div>
       </div>
+
+      {showChangePassword && (
+        <div className="bg-white p-6 rounded-2xl border border-indigo-200 shadow-sm space-y-4">
+          <div className="flex items-center gap-2 text-indigo-900 font-bold text-sm border-b pb-2">
+            <ShieldAlert className="w-5 h-5 text-indigo-600" /> ĐỔI MẬT KHẨU ĐĂNG NHẬP
+          </div>
+          <p className="text-slate-500 italic">Nên đổi sang mật khẩu riêng mà chỉ em nhớ được, để tài khoản của em được bảo mật hơn.</p>
+          <form onSubmit={handleChangePassword} className="space-y-3 max-w-md">
+            <div>
+              <label className="font-semibold block mb-1">Mật khẩu hiện tại (*):</label>
+              <input
+                type="password" required placeholder="Mật khẩu đang dùng để đăng nhập"
+                value={pwForm.current} onChange={e => setPwForm({ ...pwForm, current: e.target.value })}
+                className="w-full p-2.5 border rounded-xl"
+              />
+            </div>
+            <div>
+              <label className="font-semibold block mb-1">Mật khẩu mới (*):</label>
+              <input
+                type="password" required placeholder="Tối thiểu 4 ký tự"
+                value={pwForm.next} onChange={e => setPwForm({ ...pwForm, next: e.target.value })}
+                className="w-full p-2.5 border rounded-xl"
+              />
+            </div>
+            <div>
+              <label className="font-semibold block mb-1">Nhập lại mật khẩu mới (*):</label>
+              <input
+                type="password" required placeholder="Nhập lại mật khẩu mới"
+                value={pwForm.confirm} onChange={e => setPwForm({ ...pwForm, confirm: e.target.value })}
+                className="w-full p-2.5 border rounded-xl"
+              />
+            </div>
+            <button type="submit" disabled={pwSaving} className="py-2.5 px-5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow transition">
+              {pwSaving ? 'Đang lưu...' : 'Xác Nhận Đổi Mật Khẩu'}
+            </button>
+          </form>
+        </div>
+      )}
 
       {showRules && (
         <div className="bg-white p-6 rounded-2xl border border-amber-200 shadow-sm space-y-5">

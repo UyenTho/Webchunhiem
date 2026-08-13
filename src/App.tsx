@@ -101,6 +101,11 @@ const COMPETITION_RULES: { type: 'violation' | 'commendation'; content: string; 
   { type: 'violation', content: 'Mang đồ ăn, nước ngọt vào sử dụng trong giờ học', points: 2 },
 ];
 
+// ==================== DANH SÁCH CHỨC VỤ BAN CÁN SỰ LỚP ====================
+// Dùng chung cho: dropdown đổi chức vụ trong bảng Danh Sách Học Sinh,
+// form Thêm Học Sinh Mới, và tab Phân Chia Tổ & Ban Cán Sự.
+const ROLES: string[] = ['Học sinh', 'Lớp trưởng', 'Lớp phó', 'Bí thư', 'Thư ký', 'Thủ quỹ', 'Tổ trưởng'];
+
 export default function App() {
   const [currentView, setCurrentView] = useState<ViewType>('login');
 
@@ -1207,7 +1212,7 @@ function ClassLeaderPortal({ student, onSwitchToStudentView }: { student: Studen
 
 // ==================== 5. BẢNG ĐIỀU KHIỂN GIÁO VIÊN CHỦ NHIỆM ====================
 function TeacherDashboard({ teacher }: { teacher: Teacher }) {
-  const [activeTab, setActiveTab] = useState<'students' | 'fees' | 'announcements' | 'reports'>('students');
+  const [activeTab, setActiveTab] = useState<'students' | 'fees' | 'announcements' | 'reports' | 'groups'>('students');
   const [students, setStudents] = useState<Student[]>([]);
   const [feeItems, setFeeItems] = useState<FeeItem[]>([]);
   const [feePayments, setFeePayments] = useState<FeePayment[]>([]);
@@ -1272,6 +1277,63 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
       setStudents(prev =>
         prev.map(s => (s.id === studentId ? { ...s, class_role: newRole } : s))
       );
+    }
+  };
+
+  // Hàm gán/đổi Tổ cho 1 học sinh (dùng trong tab Phân Chia Tổ & Ban Cán Sự).
+  // Nếu học sinh đang là "Tổ trưởng" của Tổ cũ mà bị chuyển sang Tổ khác,
+  // tự động thu hồi chức vụ Tổ trưởng (vì Tổ trưởng gắn liền với 1 Tổ cụ thể).
+  const handleAssignGroup = async (studentId: string, groupNumber: number) => {
+    const target = students.find(s => s.id === studentId);
+    if (!target) return;
+    const shouldResetRole = target.class_role === 'Tổ trưởng' && (target.group_number || 1) !== groupNumber;
+    const updatePayload: any = { group_number: groupNumber };
+    if (shouldResetRole) updatePayload.class_role = 'Học sinh';
+
+    const { error } = await supabase.from('students').update(updatePayload).eq('id', studentId);
+    if (error) {
+      alert('Lỗi cập nhật Tổ: ' + error.message);
+      return;
+    }
+    setStudents(prev => prev.map(s => (
+      s.id === studentId
+        ? { ...s, group_number: groupNumber, ...(shouldResetRole ? { class_role: 'Học sinh' } : {}) }
+        : s
+    )));
+  };
+
+  // Hàm phân công 1 chức vụ Ban cán sự (Lớp trưởng, Bí thư, Thư ký, Thủ quỹ, Tổ trưởng) cho 1 học sinh.
+  // Tự động thu hồi chức vụ của người tiền nhiệm đang giữ chức vụ đó (trong phạm vi restrictGroup nếu có,
+  // dùng cho Tổ trưởng vì mỗi Tổ chỉ có 1 Tổ trưởng riêng). Truyền studentId = '' để chỉ thu hồi (bỏ trống chức vụ).
+  const handleAssignSpecialRole = async (role: string, studentId: string, restrictGroup?: number) => {
+    const holders = students.filter(s =>
+      s.class_role === role &&
+      (restrictGroup ? (s.group_number || 1) === restrictGroup : true) &&
+      s.id !== studentId
+    );
+
+    try {
+      if (holders.length > 0) {
+        const { error: resetErr } = await supabase
+          .from('students')
+          .update({ class_role: 'Học sinh' })
+          .in('id', holders.map(h => h.id));
+        if (resetErr) throw resetErr;
+      }
+      if (studentId) {
+        const { error: setErr } = await supabase
+          .from('students')
+          .update({ class_role: role })
+          .eq('id', studentId);
+        if (setErr) throw setErr;
+      }
+      setStudents(prev => prev.map(s => {
+        if (holders.some(h => h.id === s.id)) return { ...s, class_role: 'Học sinh' };
+        if (studentId && s.id === studentId) return { ...s, class_role: role };
+        return s;
+      }));
+    } catch (err: any) {
+      alert('Lỗi cập nhật chức vụ: ' + err.message);
     }
   };
 
@@ -1444,6 +1506,7 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
         </div>
         <div className="flex gap-2 flex-wrap">
           <button onClick={() => setActiveTab('students')} className={`px-4 py-2 rounded-xl font-bold transition ${activeTab === 'students' ? 'bg-indigo-600 text-white shadow' : 'bg-slate-100'}`}>👨‍🎓 Danh Sách Học Sinh</button>
+          <button onClick={() => setActiveTab('groups')} className={`px-4 py-2 rounded-xl font-bold transition ${activeTab === 'groups' ? 'bg-indigo-600 text-white shadow' : 'bg-slate-100'}`}>🗂️ Phân Chia Tổ & Ban Cán Sự</button>
           <button onClick={() => setActiveTab('fees')} className={`px-4 py-2 rounded-xl font-bold transition ${activeTab === 'fees' ? 'bg-indigo-600 text-white shadow' : 'bg-slate-100'}`}>💰 Quản Lý Khoản Thu</button>
           <button onClick={() => setActiveTab('reports')} className={`px-4 py-2 rounded-xl font-bold transition ${activeTab === 'reports' ? 'bg-indigo-600 text-white shadow' : 'bg-slate-100'}`}>📊 Thi Đua & Báo Cáo</button>
           <button onClick={() => setActiveTab('announcements')} className={`px-4 py-2 rounded-xl font-bold transition ${activeTab === 'announcements' ? 'bg-indigo-600 text-white shadow' : 'bg-slate-100'}`}>📢 Thông Báo & Dặn Dò</button>
@@ -1473,10 +1536,7 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
               <input type="text" required placeholder="Họ và tên" value={newStudentName} onChange={e => setNewStudentName(e.target.value)} className="p-2 border rounded-xl" />
               <input type="date" required value={newStudentDob} onChange={e => setNewStudentDob(e.target.value)} className="p-2 border rounded-xl" />
               <select value={newStudentRole} onChange={e => setNewStudentRole(e.target.value)} className="p-2 border rounded-xl">
-                <option value="Học sinh">Học sinh</option>
-                <option value="Lớp trưởng">Lớp trưởng</option>
-                <option value="Lớp phó">Lớp phó</option>
-                <option value="Tổ trưởng">Tổ trưởng</option>
+                {ROLES.map(role => <option key={role} value={role}>{role}</option>)}
               </select>
               <input type="number" min="1" max="4" value={newStudentGroup} onChange={e => setNewStudentGroup(Number(e.target.value))} className="p-2 border rounded-xl" placeholder="Tổ (1-4)" />
               <button type="submit" className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow">Thêm Học Sinh</button>
@@ -1508,10 +1568,7 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
                         onChange={(e) => handleUpdateStudentRole(s.id, e.target.value)}
                         className="p-1.5 border border-purple-200 bg-purple-50 text-purple-800 font-bold rounded-xl text-xs focus:ring-2 focus:ring-purple-400 outline-none"
                       >
-                        <option value="Học sinh">Học sinh</option>
-                        <option value="Lớp trưởng">Lớp trưởng</option>
-                        <option value="Lớp phó">Lớp phó</option>
-                        <option value="Tổ trưởng">Tổ trưởng</option>
+                        {ROLES.map(role => <option key={role} value={role}>{role}</option>)}
                       </select>
                     </td>
                     <td className="p-3 border-r text-center">
@@ -1532,6 +1589,106 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
                 ))}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'groups' && (
+        <div className="space-y-6">
+          <div className="bg-white p-5 rounded-2xl border shadow-sm space-y-4">
+            <div>
+              <h2 className="font-bold text-slate-800 text-sm">📌 Phân Chia Học Sinh Theo Tổ (1 - 4)</h2>
+              <p className="text-slate-500 text-[11px] mt-1">Tick chọn học sinh vào Tổ tương ứng. Mỗi học sinh chỉ thuộc 1 Tổ — tick vào Tổ khác sẽ tự động chuyển học sinh sang Tổ đó.</p>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+              {[1, 2, 3, 4].map(groupNum => (
+                <div key={groupNum} className="border rounded-2xl overflow-hidden">
+                  <div className="bg-indigo-600 text-white font-bold px-3 py-2 flex justify-between items-center">
+                    <span>Tổ {groupNum}</span>
+                    <span className="bg-indigo-800/60 px-2 py-0.5 rounded-full text-[10px]">
+                      {students.filter(s => (s.group_number || 1) === groupNum).length} HS
+                    </span>
+                  </div>
+                  <div className="max-h-72 overflow-y-auto divide-y">
+                    {students.map(s => {
+                      const checked = (s.group_number || 1) === groupNum;
+                      return (
+                        <label key={s.id} className={`flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-slate-50 ${checked ? 'bg-indigo-50' : ''}`}>
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => handleAssignGroup(s.id, groupNum)}
+                            className="w-4 h-4 accent-indigo-600"
+                          />
+                          <span className="flex-1">
+                            <span className="font-mono text-indigo-700 font-bold mr-1">{s.code}</span>
+                            {s.full_name}
+                          </span>
+                          {checked && s.class_role === 'Tổ trưởng' && (
+                            <span className="text-[10px] bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded font-bold">Tổ trưởng</span>
+                          )}
+                        </label>
+                      );
+                    })}
+                    {students.length === 0 && <p className="p-3 text-slate-400 italic">Chưa có học sinh trong lớp.</p>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="bg-white p-5 rounded-2xl border shadow-sm space-y-4">
+            <div>
+              <h2 className="font-bold text-slate-800 text-sm">👥 Phân Công Ban Cán Sự Lớp</h2>
+              <p className="text-slate-500 text-[11px] mt-1">Chọn học sinh đảm nhiệm từng chức vụ. Hệ thống tự động thu hồi chức vụ cũ của người tiền nhiệm (nếu có).</p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {['Lớp trưởng', 'Bí thư', 'Thư ký', 'Thủ quỹ'].map(role => {
+                const currentHolder = students.find(s => s.class_role === role);
+                return (
+                  <div key={role} className="p-3 border rounded-xl bg-slate-50 space-y-1.5">
+                    <label className="font-bold text-slate-700 block">{role}:</label>
+                    <select
+                      value={currentHolder?.id || ''}
+                      onChange={(e) => handleAssignSpecialRole(role, e.target.value)}
+                      className="w-full p-2 border rounded-xl bg-white"
+                    >
+                      <option value="">-- Chưa phân công --</option>
+                      {students.map(s => (
+                        <option key={s.id} value={s.id}>{s.full_name} (MSHS: {s.code})</option>
+                      ))}
+                    </select>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="border-t pt-4">
+              <h3 className="font-bold text-slate-700 mb-2">Tổ Trưởng Các Tổ</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+                {[1, 2, 3, 4].map(groupNum => {
+                  const groupStudents = students.filter(s => (s.group_number || 1) === groupNum);
+                  const currentLeader = groupStudents.find(s => s.class_role === 'Tổ trưởng');
+                  return (
+                    <div key={groupNum} className="p-3 border rounded-xl bg-slate-50 space-y-1.5">
+                      <label className="font-bold text-slate-700 block">Tổ trưởng Tổ {groupNum}:</label>
+                      <select
+                        value={currentLeader?.id || ''}
+                        onChange={(e) => handleAssignSpecialRole('Tổ trưởng', e.target.value, groupNum)}
+                        className="w-full p-2 border rounded-xl bg-white"
+                      >
+                        <option value="">-- Chưa phân công --</option>
+                        {groupStudents.map(s => (
+                          <option key={s.id} value={s.id}>{s.full_name} (MSHS: {s.code})</option>
+                        ))}
+                      </select>
+                      {groupStudents.length === 0 && <p className="text-[10px] text-slate-400 italic">Tổ chưa có học sinh nào.</p>}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
           </div>
         </div>
       )}

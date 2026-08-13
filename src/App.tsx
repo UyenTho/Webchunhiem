@@ -1517,7 +1517,7 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
       const sheet = workbook.Sheets[workbook.SheetNames[0]];
       const rows: any[] = XLSX.utils.sheet_to_json(sheet, { defval: '' });
 
-      const mapped = rows.map((r) => {
+      const mappedRaw = rows.map((r) => {
         let dob = r['Ngày sinh'] || r['DOB'] || '';
         if (dob instanceof Date) dob = dob.toISOString().slice(0, 10);
         const code = String(r['MSHS'] || r['Mã số'] || '').trim().toUpperCase();
@@ -1535,18 +1535,44 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
         };
       }).filter(r => r.code && r.full_name);
 
-      if (mapped.length === 0) {
+      if (mappedRaw.length === 0) {
         alert('Không đọc được dữ liệu. Kiểm tra file có đúng cột: MSHS, Họ và tên, Ngày sinh, Chức vụ, Tổ không.');
         setImporting(false);
         return;
       }
 
-      const { error } = await supabase.from('students').upsert(mapped, { onConflict: 'teacher_id,code' });
-      if (error) alert('Lỗi khi nhập danh sách: ' + error.message);
-      else {
-        alert(`Đã nhập thành công ${mapped.length} học sinh!`);
-        fetchData();
+      // Loại bỏ các dòng bị trùng MSHS ngay trong file Excel (giữ lại dòng CUỐI CÙNG nếu trùng),
+      // vì Supabase upsert sẽ báo lỗi nếu trong cùng 1 lần gọi có nhiều dòng cùng khóa xung đột (teacher_id, code).
+      const dedupedMap = new Map<string, typeof mappedRaw[number]>();
+      const duplicateCodes = new Set<string>();
+      for (const row of mappedRaw) {
+        if (dedupedMap.has(row.code)) duplicateCodes.add(row.code);
+        dedupedMap.set(row.code, row);
       }
+      const mapped = Array.from(dedupedMap.values());
+
+      const { error } = await supabase.from('students').upsert(mapped, { onConflict: 'teacher_id,code' });
+
+      if (error) {
+        if (error.message.includes('duplicate key') || error.message.includes('unique constraint')) {
+          alert(
+            'Lỗi: MSHS bị trùng và không thể lưu vì ràng buộc "duy nhất" trong cơ sở dữ liệu hiện đang áp dụng trên TOÀN HỆ THỐNG (không chỉ riêng lớp của thầy/cô).\n\n' +
+            'Vui lòng liên hệ Admin/lập trình viên để cập nhật lại ràng buộc unique của bảng "students" thành (teacher_id, code) thay vì chỉ (code).'
+          );
+        } else {
+          alert('Lỗi khi nhập danh sách: ' + error.message);
+        }
+        setImporting(false);
+        if (fileInputRef.current) fileInputRef.current.value = '';
+        return;
+      }
+
+      let msg = `Đã nhập thành công ${mapped.length} học sinh!`;
+      if (duplicateCodes.size > 0) {
+        msg += `\n\n⚠️ Lưu ý: Phát hiện ${duplicateCodes.size} MSHS bị trùng trong file (${Array.from(duplicateCodes).join(', ')}) — hệ thống chỉ giữ lại dòng CUỐI CÙNG của mỗi MSHS trùng, vui lòng kiểm tra lại file gốc nếu cần.`;
+      }
+      alert(msg);
+      fetchData();
     } catch (err: any) {
       alert('Lỗi đọc file Excel: ' + err.message);
     } finally {
@@ -1554,7 +1580,6 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
-
   const handleExportStudents = () => {
     const data = students.map(s => ({
       'MSHS': s.code,

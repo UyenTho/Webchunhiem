@@ -2,7 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import * as XLSX from 'xlsx';
 import {
   Users, Wallet, CheckCircle, XCircle, Trash2, Award, LogOut,
-  ShieldAlert, Trophy, Bell, AlertCircle, RefreshCw, BookOpen, FileText, PlusCircle
+  ShieldAlert, Trophy, Bell, AlertCircle, RefreshCw, BookOpen, FileText, PlusCircle,
+  Coins, Receipt
 } from 'lucide-react';
 import { supabase } from './supabaseClient';
 
@@ -45,6 +46,24 @@ interface FeePayment {
   is_paid: boolean;
 }
 
+interface FeeExpense {
+  id: string;
+  teacher_id: string;
+  title: string;
+  amount: number;
+  expense_date: string;
+  note?: string;
+}
+
+interface GroupWeeklyScore {
+  id: string;
+  teacher_id: string;
+  week_number: number;
+  group_number: number;
+  score: number;
+  note?: string;
+}
+
 interface Announcement {
   id: string;
   teacher_id: string;
@@ -68,7 +87,7 @@ interface StudentRecord {
 
 type ViewType =
   | 'login' | 'forgot_password' | 'reset_password' | 'register_payment'
-  | 'admin' | 'teacher' | 'student_portal' | 'class_leader_portal';
+  | 'admin' | 'teacher' | 'student_portal' | 'class_leader_portal' | 'treasurer_portal';
 
 // ==================== BẢNG QUY ĐỊNH ĐIỂM THI ĐUA ====================
 // Đồng bộ với Bảng Nội Quy Thi Đua hiển thị cho học sinh (mục II và III trong StudentPortal).
@@ -140,6 +159,11 @@ export default function App() {
     setCurrentView('login');
   };
 
+  const isRole = (role: string | undefined, ...keywords: string[]) => {
+    const r = (role || '').toLowerCase().trim();
+    return keywords.some(k => r.includes(k));
+  };
+
   return (
     <div className="min-h-screen bg-slate-100 font-sans text-slate-800">
       {/* HEADER TỔNG */}
@@ -164,9 +188,10 @@ export default function App() {
           onTeacherLogin={(teacher: Teacher) => { setCurrentTeacher(teacher); setCurrentView('teacher'); }}
           onStudentLogin={(student: Student) => {
             setLoggedInStudent(student);
-            const r = (student.class_role || '').toLowerCase().trim();
-            if (r.includes('lớp trưởng') || r.includes('lop truong')) {
+            if (isRole(student.class_role, 'lớp trưởng', 'lop truong')) {
               setCurrentView('class_leader_portal');
+            } else if (isRole(student.class_role, 'thủ quỹ', 'thu quy')) {
+              setCurrentView('treasurer_portal');
             } else {
               setCurrentView('student_portal');
             }
@@ -207,16 +232,29 @@ export default function App() {
         <ClassLeaderPortal student={loggedInStudent} onSwitchToStudentView={() => setCurrentView('student_portal')} />
       )}
 
+      {currentView === 'treasurer_portal' && loggedInStudent && (
+        <TreasurerPortal student={loggedInStudent} onSwitchToStudentView={() => setCurrentView('student_portal')} />
+      )}
+
       {currentView === 'student_portal' && loggedInStudent && (
         <div className="space-y-2">
-          {((loggedInStudent.class_role || '').toLowerCase().includes('lớp trưởng') ||
-            (loggedInStudent.class_role || '').toLowerCase().includes('lop truong')) && (
+          {isRole(loggedInStudent.class_role, 'lớp trưởng', 'lop truong') && (
             <div className="max-w-5xl mx-auto pt-4 px-4 text-right">
               <button
                 onClick={() => setCurrentView('class_leader_portal')}
                 className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs px-4 py-2 rounded-xl shadow"
               >
                 🚀 Mở Cổng Báo Cáo Thi Đua Lớp Trưởng
+              </button>
+            </div>
+          )}
+          {isRole(loggedInStudent.class_role, 'thủ quỹ', 'thu quy') && (
+            <div className="max-w-5xl mx-auto pt-4 px-4 text-right">
+              <button
+                onClick={() => setCurrentView('treasurer_portal')}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-4 py-2 rounded-xl shadow"
+              >
+                💰 Mở Cổng Quản Lý Quỹ Lớp - Thủ Quỹ
               </button>
             </div>
           )}
@@ -565,6 +603,9 @@ function StudentPortal({ student, onRefreshStudent }: { student: Student; onRefr
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [feeItems, setFeeItems] = useState<FeeItem[]>([]);
   const [feePayments, setFeePayments] = useState<FeePayment[]>([]);
+  const [allFeePayments, setAllFeePayments] = useState<FeePayment[]>([]);
+  const [feeExpenses, setFeeExpenses] = useState<FeeExpense[]>([]);
+  const [groupScores, setGroupScores] = useState<GroupWeeklyScore[]>([]);
   const [records, setRecords] = useState<StudentRecord[]>([]);
   const [showRules, setShowRules] = useState(false);
   const [showChangePassword, setShowChangePassword] = useState(false);
@@ -606,17 +647,31 @@ function StudentPortal({ student, onRefreshStudent }: { student: Student; onRefr
   }, [student.id]);
 
   const fetchStudentData = async () => {
-    const [annRes, feeRes, payRes, recRes] = await Promise.all([
+    const [annRes, feeRes, payRes, recRes, expRes, scoreRes] = await Promise.all([
       supabase.from('announcements').select('*').eq('teacher_id', student.teacher_id).order('created_date', { ascending: false }).order('id', { ascending: false }),
       supabase.from('fee_items').select('*').eq('teacher_id', student.teacher_id),
       supabase.from('fee_payments').select('*').eq('student_id', student.id),
-      supabase.from('student_records').select('*').eq('student_id', student.id).order('week_number', { ascending: false })
+      supabase.from('student_records').select('*').eq('student_id', student.id).order('week_number', { ascending: false }),
+      supabase.from('fee_expenses').select('*').eq('teacher_id', student.teacher_id).order('expense_date', { ascending: false }),
+      supabase.from('group_weekly_scores').select('*').eq('teacher_id', student.teacher_id).order('week_number', { ascending: true })
     ]);
 
     if (annRes.data) setAnnouncements(annRes.data as Announcement[]);
     if (feeRes.data) setFeeItems(feeRes.data as FeeItem[]);
     if (payRes.data) setFeePayments(payRes.data as FeePayment[]);
     if (recRes.data) setRecords(recRes.data as StudentRecord[]);
+    if (expRes.data) setFeeExpenses(expRes.data as FeeExpense[]);
+    if (scoreRes.data) setGroupScores(scoreRes.data as GroupWeeklyScore[]);
+
+    // Lấy TOÀN BỘ lượt "đã nộp" của cả lớp (không chỉ riêng học sinh này) để tính
+    // Tổng Quỹ Đã Thu hiển thị công khai cho cả lớp.
+    const feeItemIds = (feeRes.data || []).map((f: any) => f.id);
+    if (feeItemIds.length > 0) {
+      const { data: allPayData } = await supabase.from('fee_payments').select('*').in('fee_item_id', feeItemIds).eq('is_paid', true);
+      if (allPayData) setAllFeePayments(allPayData as FeePayment[]);
+    } else {
+      setAllFeePayments([]);
+    }
   };
 
   // Lớp trưởng có thể gửi lại báo cáo thi đua tuần nhiều lần (mỗi lần gửi tạo 1 dòng thông báo mới).
@@ -700,6 +755,15 @@ function StudentPortal({ student, onRefreshStudent }: { student: Student; onRefr
   const totalDeduction = (records || []).filter(r => r.type === 'violation').reduce((sum, r) => sum + Number(r.points || 0), 0);
   const totalBonus = (records || []).filter(r => r.type === 'commendation').reduce((sum, r) => sum + Number(r.points || 0), 0);
   const currentTotalScore = 100 - totalDeduction + totalBonus;
+
+  const totalCollected = feeItems.reduce((sum, item) => {
+    const paidCount = allFeePayments.filter(p => p.fee_item_id === item.id).length;
+    return sum + Number(item.amount) * paidCount;
+  }, 0);
+  const totalExpense = feeExpenses.reduce((sum, e) => sum + Number(e.amount), 0);
+  const fundBalance = totalCollected - totalExpense;
+
+  const weeksWithScores = [...new Set(groupScores.map(s => s.week_number))].sort((a, b) => a - b);
 
   return (
     <div className="max-w-5xl mx-auto p-4 md:p-6 space-y-6 text-xs font-sans">
@@ -967,6 +1031,43 @@ function StudentPortal({ student, onRefreshStudent }: { student: Student; onRefr
         )}
       </div>
 
+      {weeksWithScores.length > 0 && (
+        <div className="bg-white p-5 rounded-2xl border shadow-sm space-y-3">
+          <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2 border-b pb-2">
+            <Trophy className="w-4.5 h-4.5 text-amber-500" /> Thi Đua Các Tổ Theo Từng Tuần
+          </h2>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead className="bg-slate-50 font-bold border-b text-slate-700">
+                <tr>
+                  <th className="p-2 border-r text-center">Tuần</th>
+                  <th className="p-2 border-r text-center">Tổ 1</th>
+                  <th className="p-2 border-r text-center">Tổ 2</th>
+                  <th className="p-2 border-r text-center">Tổ 3</th>
+                  <th className="p-2 text-center">Tổ 4</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {weeksWithScores.map(week => (
+                  <tr key={week} className={(student.group_number || 1) ? 'hover:bg-slate-50' : ''}>
+                    <td className="p-2 border-r text-center font-bold">{week}</td>
+                    {[1, 2, 3, 4].map(g => {
+                      const row = groupScores.find(s => s.week_number === week && s.group_number === g);
+                      const isMyGroup = (student.group_number || 1) === g;
+                      return (
+                        <td key={g} className={`p-2 border-r last:border-r-0 text-center font-bold ${isMyGroup ? 'bg-indigo-50 text-indigo-700' : 'text-slate-600'}`}>
+                          {row ? row.score : '—'}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       <div className="bg-white p-5 rounded-2xl border shadow-sm space-y-3">
         <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2 border-b pb-2">
           <Wallet className="w-4.5 h-4.5 text-indigo-600" /> Các Khoản Thu & Quỹ Lớp
@@ -1009,6 +1110,49 @@ function StudentPortal({ student, onRefreshStudent }: { student: Student; onRefr
                 })}
               </tbody>
             </table>
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-3 border-t">
+          <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-center">
+            <span className="text-[10px] text-emerald-700 font-bold uppercase block">Tổng Đã Thu (Cả Lớp)</span>
+            <span className="text-lg font-black text-emerald-700">{totalCollected.toLocaleString()} đ</span>
+          </div>
+          <div className="bg-rose-50 border border-rose-200 rounded-xl p-3 text-center">
+            <span className="text-[10px] text-rose-700 font-bold uppercase block">Tổng Đã Chi</span>
+            <span className="text-lg font-black text-rose-700">{totalExpense.toLocaleString()} đ</span>
+          </div>
+          <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-3 text-center">
+            <span className="text-[10px] text-indigo-700 font-bold uppercase block">Quỹ Lớp Còn Lại</span>
+            <span className="text-lg font-black text-indigo-700">{fundBalance.toLocaleString()} đ</span>
+          </div>
+        </div>
+
+        {feeExpenses.length > 0 && (
+          <div className="pt-2">
+            <h3 className="font-bold text-slate-700 mb-2 flex items-center gap-1.5"><Receipt className="w-4 h-4 text-rose-600" /> Chi Tiết Các Khoản Đã Chi</h3>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead className="bg-rose-50 font-bold border-b text-rose-800">
+                  <tr>
+                    <th className="p-2 border-r">Ngày Chi</th>
+                    <th className="p-2 border-r">Nội Dung Chi</th>
+                    <th className="p-2 border-r text-right">Số Tiền</th>
+                    <th className="p-2">Ghi Chú</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {feeExpenses.map(e => (
+                    <tr key={e.id} className="hover:bg-slate-50">
+                      <td className="p-2 border-r font-mono text-slate-600">{e.expense_date}</td>
+                      <td className="p-2 border-r font-semibold">{e.title}</td>
+                      <td className="p-2 border-r text-right font-bold text-rose-700">{Number(e.amount).toLocaleString()} đ</td>
+                      <td className="p-2 text-slate-500 italic">{e.note || '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
       </div>
@@ -1059,19 +1203,20 @@ function ClassLeaderPortal({ student, onSwitchToStudentView }: { student: Studen
 
   const [groupScores, setGroupScores] = useState({ group1: '100', group2: '100', group3: '100', group4: '100' });
   const [leaderNote, setLeaderNote] = useState('');
+  const [scoreHistory, setScoreHistory] = useState<GroupWeeklyScore[]>([]);
 
   useEffect(() => {
     fetchClassData();
   }, [student.id]);
 
   const fetchClassData = async () => {
-    const { data, error } = await supabase
-      .from('students')
-      .select('*')
-      .eq('teacher_id', student.teacher_id)
-      .order('code', { ascending: true });
+    const [stRes, gsRes] = await Promise.all([
+      supabase.from('students').select('*').eq('teacher_id', student.teacher_id).order('code', { ascending: true }),
+      supabase.from('group_weekly_scores').select('*').eq('teacher_id', student.teacher_id).order('week_number', { ascending: true }),
+    ]);
 
-    if (!error && data) setClassStudents(data as Student[]);
+    if (stRes.data) setClassStudents(stRes.data as Student[]);
+    if (gsRes.data) setScoreHistory(gsRes.data as GroupWeeklyScore[]);
   };
 
   // Xử lý khi lớp trưởng chọn 1 nội dung trong dropdown quy định điểm
@@ -1133,13 +1278,33 @@ function ClassLeaderPortal({ student, onSwitchToStudentView }: { student: Studen
       p_content: summaryText,
     });
 
-    if (!error) {
-      alert('Đã gửi báo cáo thi đua tuần tới Giáo viên chủ nhiệm!');
-      setLeaderNote('');
-    } else {
+    if (error) {
       alert('Lỗi nộp báo cáo: ' + error.message);
+      return;
     }
+
+    // Lưu điểm từng Tổ vào bảng có cấu trúc (group_weekly_scores) để GVCN và cả lớp
+    // xem được dưới dạng bảng rõ ràng theo từng tuần, thay vì chỉ nằm trong văn bản thông báo.
+    const { error: scoreErr } = await supabase.rpc('leader_submit_group_scores', {
+      p_leader_student_id: student.id,
+      p_week_number: weekNumber,
+      p_group1: g1,
+      p_group2: g2,
+      p_group3: g3,
+      p_group4: g4,
+      p_note: leaderNote || null,
+    });
+
+    if (scoreErr) {
+      alert('Đã gửi thông báo nhưng lỗi khi lưu bảng điểm Tổ: ' + scoreErr.message);
+    } else {
+      alert('Đã gửi báo cáo thi đua tuần tới Giáo viên chủ nhiệm!');
+    }
+    setLeaderNote('');
+    fetchClassData();
   };
+
+  const weeksWithScores = [...new Set(scoreHistory.map(s => s.week_number))].sort((a, b) => a - b);
 
   return (
     <div className="max-w-5xl mx-auto p-6 space-y-6 text-xs font-sans">
@@ -1306,6 +1471,283 @@ function ClassLeaderPortal({ student, onSwitchToStudentView }: { student: Studen
               Gửi Báo Cáo Thi Đua Lớp
             </button>
           </form>
+
+          {weeksWithScores.length > 0 && (
+            <div className="pt-3 border-t">
+              <h3 className="font-bold text-slate-700 mb-2">Lịch Sử Điểm Thi Đua Các Tổ Đã Gửi</h3>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead className="bg-slate-50 font-bold border-b text-slate-700">
+                    <tr>
+                      <th className="p-2 border-r text-center">Tuần</th>
+                      <th className="p-2 border-r text-center">Tổ 1</th>
+                      <th className="p-2 border-r text-center">Tổ 2</th>
+                      <th className="p-2 border-r text-center">Tổ 3</th>
+                      <th className="p-2 text-center">Tổ 4</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {weeksWithScores.map(week => (
+                      <tr key={week} className="hover:bg-slate-50">
+                        <td className="p-2 border-r text-center font-bold">{week}</td>
+                        {[1, 2, 3, 4].map(g => {
+                          const row = scoreHistory.find(s => s.week_number === week && s.group_number === g);
+                          return <td key={g} className="p-2 border-r last:border-r-0 text-center font-bold text-indigo-700">{row ? row.score : '—'}</td>;
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ==================== 4b. CỔNG QUẢN LÝ QUỸ LỚP DÀNH CHO THỦ QUỸ ====================
+function TreasurerPortal({ student, onSwitchToStudentView }: { student: Student; onSwitchToStudentView: () => void }) {
+  const [classStudents, setClassStudents] = useState<Student[]>([]);
+  const [feeItems, setFeeItems] = useState<FeeItem[]>([]);
+  const [feePayments, setFeePayments] = useState<FeePayment[]>([]);
+  const [feeExpenses, setFeeExpenses] = useState<FeeExpense[]>([]);
+
+  const [feeTitle, setFeeTitle] = useState('');
+  const [feeAmount, setFeeAmount] = useState('');
+  const [feeDeadline, setFeeDeadline] = useState('');
+
+  const [selectedFeeItemId, setSelectedFeeItemId] = useState('');
+
+  const [expTitle, setExpTitle] = useState('');
+  const [expAmount, setExpAmount] = useState('');
+  const [expDate, setExpDate] = useState(new Date().toISOString().slice(0, 10));
+  const [expNote, setExpNote] = useState('');
+
+  useEffect(() => {
+    fetchAll();
+  }, [student.id]);
+
+  const fetchAll = async () => {
+    const [stRes, feeRes, expRes] = await Promise.all([
+      supabase.from('students').select('*').eq('teacher_id', student.teacher_id).order('code', { ascending: true }),
+      supabase.from('fee_items').select('*').eq('teacher_id', student.teacher_id),
+      supabase.from('fee_expenses').select('*').eq('teacher_id', student.teacher_id).order('expense_date', { ascending: false }),
+    ]);
+
+    if (stRes.data) setClassStudents(stRes.data as Student[]);
+    if (feeRes.data) {
+      setFeeItems(feeRes.data as FeeItem[]);
+      const ids = feeRes.data.map((f: any) => f.id);
+      if (ids.length > 0) {
+        const { data: payData } = await supabase.from('fee_payments').select('*').in('fee_item_id', ids);
+        if (payData) setFeePayments(payData as FeePayment[]);
+      } else {
+        setFeePayments([]);
+      }
+    }
+    if (expRes.data) setFeeExpenses(expRes.data as FeeExpense[]);
+  };
+
+  const handleAddFeeItem = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!feeTitle.trim() || !feeAmount) {
+      alert('Vui lòng nhập đầy đủ Nội dung khoản thu và Số tiền!');
+      return;
+    }
+    const { error } = await supabase.rpc('treasurer_add_fee_item', {
+      p_treasurer_student_id: student.id,
+      p_title: feeTitle.trim(),
+      p_amount: Number(feeAmount),
+      p_deadline: feeDeadline || null,
+    });
+    if (error) {
+      alert('Lỗi tạo khoản thu: ' + error.message);
+      return;
+    }
+    setFeeTitle(''); setFeeAmount(''); setFeeDeadline('');
+    fetchAll();
+  };
+
+  const handleTogglePayment = async (targetStudentId: string, feeItemId: string, currentStatus: boolean) => {
+    const { error } = await supabase.rpc('treasurer_toggle_payment', {
+      p_treasurer_student_id: student.id,
+      p_target_student_id: targetStudentId,
+      p_fee_item_id: feeItemId,
+      p_is_paid: !currentStatus,
+    });
+    if (error) {
+      alert('Lỗi cập nhật trạng thái nộp tiền: ' + error.message);
+      return;
+    }
+    fetchAll();
+  };
+
+  const handleAddExpense = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!expTitle.trim() || !expAmount) {
+      alert('Vui lòng nhập đầy đủ Nội dung chi và Số tiền!');
+      return;
+    }
+    const { error } = await supabase.rpc('treasurer_add_expense', {
+      p_treasurer_student_id: student.id,
+      p_title: expTitle.trim(),
+      p_amount: Number(expAmount),
+      p_expense_date: expDate,
+      p_note: expNote.trim() || null,
+    });
+    if (error) {
+      alert('Lỗi ghi nhận khoản chi: ' + error.message);
+      return;
+    }
+    setExpTitle(''); setExpAmount(''); setExpNote('');
+    fetchAll();
+  };
+
+  const totalCollected = feeItems.reduce((sum, item) => {
+    const paidCount = feePayments.filter(p => p.fee_item_id === item.id && p.is_paid).length;
+    return sum + Number(item.amount) * paidCount;
+  }, 0);
+  const totalExpense = feeExpenses.reduce((sum, e) => sum + Number(e.amount), 0);
+  const fundBalance = totalCollected - totalExpense;
+
+  return (
+    <div className="max-w-5xl mx-auto p-6 space-y-6 text-xs font-sans">
+      <div className="bg-emerald-700 text-white p-5 rounded-2xl shadow-lg flex justify-between items-center flex-wrap gap-3">
+        <div>
+          <span className="bg-emerald-600 border border-emerald-400 px-2.5 py-1 rounded text-[11px] font-bold uppercase">THỦ QUỸ PORTAL</span>
+          <h1 className="text-xl font-bold mt-1">Cổng Quản Lý Quỹ Lớp - Thủ Quỹ: {student.full_name}</h1>
+        </div>
+        <button onClick={onSwitchToStudentView} className="bg-white text-emerald-900 px-3.5 py-2 rounded-xl font-bold hover:bg-emerald-50 shadow transition">
+          👁️ Xem Trang Cá Nhân Học Sinh
+        </button>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 text-center">
+          <span className="text-[10px] text-emerald-700 font-bold uppercase block">Tổng Đã Thu</span>
+          <span className="text-xl font-black text-emerald-700">{totalCollected.toLocaleString()} đ</span>
+        </div>
+        <div className="bg-rose-50 border border-rose-200 rounded-2xl p-4 text-center">
+          <span className="text-[10px] text-rose-700 font-bold uppercase block">Tổng Đã Chi</span>
+          <span className="text-xl font-black text-rose-700">{totalExpense.toLocaleString()} đ</span>
+        </div>
+        <div className="bg-indigo-50 border border-indigo-200 rounded-2xl p-4 text-center">
+          <span className="text-[10px] text-indigo-700 font-bold uppercase block">Quỹ Lớp Còn Lại</span>
+          <span className="text-xl font-black text-indigo-700">{fundBalance.toLocaleString()} đ</span>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="bg-white p-5 rounded-2xl border shadow-sm space-y-4">
+          <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2 border-b pb-2">
+            <Coins className="w-4 h-4 text-emerald-600" /> Tạo Khoản Thu Mới
+          </h2>
+          <form onSubmit={handleAddFeeItem} className="space-y-3">
+            <div>
+              <label className="font-semibold block mb-1">Nội dung khoản thu (*):</label>
+              <input type="text" required placeholder="VD: Quỹ lớp học kỳ 1" value={feeTitle} onChange={e => setFeeTitle(e.target.value)} className="w-full p-2 border rounded-xl" />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="font-semibold block mb-1">Số tiền / học sinh (*):</label>
+                <input type="number" required placeholder="VD: 100000" value={feeAmount} onChange={e => setFeeAmount(e.target.value)} className="w-full p-2 border rounded-xl" />
+              </div>
+              <div>
+                <label className="font-semibold block mb-1">Hạn nộp:</label>
+                <input type="date" value={feeDeadline} onChange={e => setFeeDeadline(e.target.value)} className="w-full p-2 border rounded-xl" />
+              </div>
+            </div>
+            <button type="submit" className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow transition">
+              Tạo Khoản Thu
+            </button>
+          </form>
+
+          <div className="pt-3 border-t space-y-2">
+            <label className="font-semibold block">Chọn khoản thu để tick danh sách đã nộp:</label>
+            <select value={selectedFeeItemId} onChange={e => setSelectedFeeItemId(e.target.value)} className="w-full p-2 border rounded-xl">
+              <option value="">-- Chọn khoản thu --</option>
+              {feeItems.map(f => <option key={f.id} value={f.id}>{f.title} ({Number(f.amount).toLocaleString()} đ)</option>)}
+            </select>
+
+            {selectedFeeItemId && (
+              <div className="max-h-72 overflow-y-auto border rounded-xl divide-y">
+                {classStudents.map(s => {
+                  const pay = feePayments.find(p => p.student_id === s.id && p.fee_item_id === selectedFeeItemId);
+                  const isPaid = pay?.is_paid || false;
+                  return (
+                    <label key={s.id} className={`flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-slate-50 ${isPaid ? 'bg-emerald-50' : ''}`}>
+                      <input
+                        type="checkbox"
+                        checked={isPaid}
+                        onChange={() => handleTogglePayment(s.id, selectedFeeItemId, isPaid)}
+                        className="w-4 h-4 accent-emerald-600"
+                      />
+                      <span className="flex-1">
+                        <span className="font-mono text-indigo-700 font-bold mr-1">{s.code}</span>
+                        {s.full_name}
+                      </span>
+                      {isPaid ? (
+                        <span className="text-[10px] bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full font-bold">Đã nộp</span>
+                      ) : (
+                        <span className="text-[10px] bg-rose-100 text-rose-800 px-2 py-0.5 rounded-full font-bold">Chưa nộp</span>
+                      )}
+                    </label>
+                  );
+                })}
+                {classStudents.length === 0 && <p className="p-3 text-slate-400 italic">Lớp chưa có học sinh nào.</p>}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="bg-white p-5 rounded-2xl border shadow-sm space-y-4">
+          <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2 border-b pb-2">
+            <Receipt className="w-4 h-4 text-rose-600" /> Ghi Nhận Khoản Chi Ra
+          </h2>
+          <form onSubmit={handleAddExpense} className="space-y-3">
+            <div>
+              <label className="font-semibold block mb-1">Nội dung chi (*):</label>
+              <input type="text" required placeholder="VD: Mua hoa 20/11, in tài liệu..." value={expTitle} onChange={e => setExpTitle(e.target.value)} className="w-full p-2 border rounded-xl" />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="font-semibold block mb-1">Số tiền (*):</label>
+                <input type="number" required placeholder="VD: 200000" value={expAmount} onChange={e => setExpAmount(e.target.value)} className="w-full p-2 border rounded-xl" />
+              </div>
+              <div>
+                <label className="font-semibold block mb-1">Ngày chi (*):</label>
+                <input type="date" required value={expDate} onChange={e => setExpDate(e.target.value)} className="w-full p-2 border rounded-xl" />
+              </div>
+            </div>
+            <div>
+              <label className="font-semibold block mb-1">Ghi chú:</label>
+              <input type="text" placeholder="Ghi chú thêm (nếu có)" value={expNote} onChange={e => setExpNote(e.target.value)} className="w-full p-2 border rounded-xl" />
+            </div>
+            <button type="submit" className="w-full py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl shadow transition">
+              Ghi Nhận Khoản Chi
+            </button>
+          </form>
+
+          <div className="pt-3 border-t">
+            <h3 className="font-bold text-slate-700 mb-2">Lịch Sử Các Khoản Đã Chi</h3>
+            {feeExpenses.length === 0 ? (
+              <p className="text-slate-400 italic">Chưa có khoản chi nào.</p>
+            ) : (
+              <div className="max-h-72 overflow-y-auto space-y-2">
+                {feeExpenses.map(e => (
+                  <div key={e.id} className="p-2.5 bg-rose-50/60 border border-rose-200 rounded-xl flex justify-between items-center">
+                    <div>
+                      <span className="font-bold text-slate-800">{e.title}</span>
+                      <p className="text-[11px] text-slate-500">📅 {e.expense_date} {e.note ? `• ${e.note}` : ''}</p>
+                    </div>
+                    <span className="font-black text-rose-700">-{Number(e.amount).toLocaleString()} đ</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>
@@ -1318,6 +1760,8 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
   const [students, setStudents] = useState<Student[]>([]);
   const [feeItems, setFeeItems] = useState<FeeItem[]>([]);
   const [feePayments, setFeePayments] = useState<FeePayment[]>([]);
+  const [feeExpenses, setFeeExpenses] = useState<FeeExpense[]>([]);
+  const [groupWeeklyScores, setGroupWeeklyScores] = useState<GroupWeeklyScore[]>([]);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [studentRecords, setStudentRecords] = useState<StudentRecord[]>([]);
   const [selectedStudentForModal, setSelectedStudentForModal] = useState<Student | null>(null);
@@ -1339,6 +1783,11 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
   const [feeAmount, setFeeAmount] = useState('');
   const [feeDeadline, setFeeDeadline] = useState('');
 
+  const [expTitle, setExpTitle] = useState('');
+  const [expAmount, setExpAmount] = useState('');
+  const [expDate, setExpDate] = useState(new Date().toISOString().slice(0, 10));
+  const [expNote, setExpNote] = useState('');
+
   const [annTitle, setAnnTitle] = useState('');
   const [annContent, setAnnContent] = useState('');
   const [annImportant, setAnnImportant] = useState(false);
@@ -1348,11 +1797,13 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
   }, [teacher.id]);
 
   const fetchData = async () => {
-    const [stRes, fRes, aRes, rRes] = await Promise.all([
+    const [stRes, fRes, aRes, rRes, gsRes, expRes] = await Promise.all([
       supabase.from('students').select('*').eq('teacher_id', teacher.id).order('code', { ascending: true }),
       supabase.from('fee_items').select('*').eq('teacher_id', teacher.id),
       supabase.from('announcements').select('*').eq('teacher_id', teacher.id).order('created_date', { ascending: false }),
-      supabase.from('student_records').select('*').eq('teacher_id', teacher.id).order('week_number', { ascending: false })
+      supabase.from('student_records').select('*').eq('teacher_id', teacher.id).order('week_number', { ascending: false }),
+      supabase.from('group_weekly_scores').select('*').eq('teacher_id', teacher.id).order('week_number', { ascending: true }),
+      supabase.from('fee_expenses').select('*').eq('teacher_id', teacher.id).order('expense_date', { ascending: false }),
     ]);
 
     if (stRes.data) setStudents(stRes.data as Student[]);
@@ -1367,6 +1818,8 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
     }
     if (aRes.data) setAnnouncements(aRes.data as Announcement[]);
     if (rRes.data) setStudentRecords(rRes.data as StudentRecord[]);
+    if (gsRes.data) setGroupWeeklyScores(gsRes.data as GroupWeeklyScore[]);
+    if (expRes.data) setFeeExpenses(expRes.data as FeeExpense[]);
   };
 
   // Hàm thay đổi chức vụ trực tiếp cho học sinh
@@ -1386,6 +1839,9 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
   };
 
   // Hàm gán/đổi Tổ cho 1 học sinh (dùng trong tab Phân Chia Tổ & Ban Cán Sự).
+  // Mỗi học sinh chỉ thuộc DUY NHẤT 1 Tổ tại một thời điểm — khi chuyển học sinh
+  // sang Tổ mới, học sinh đó sẽ NGAY LẬP TỨC biến mất khỏi danh sách của Tổ cũ
+  // (vì mỗi cột Tổ chỉ hiển thị đúng những học sinh có group_number = số Tổ đó).
   // Nếu học sinh đang là "Tổ trưởng" của Tổ cũ mà bị chuyển sang Tổ khác,
   // tự động thu hồi chức vụ Tổ trưởng (vì Tổ trưởng gắn liền với 1 Tổ cụ thể).
   const handleAssignGroup = async (studentId: string, groupNumber: number) => {
@@ -1636,6 +2092,19 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
     XLSX.writeFile(wb, `NhatKyRenLuyen.xlsx`);
   };
 
+  const handleExportExpenses = () => {
+    const data = feeExpenses.map(e => ({
+      'Ngày chi': e.expense_date,
+      'Nội dung chi': e.title,
+      'Số tiền': e.amount,
+      'Ghi chú': e.note || '',
+    }));
+    const ws = XLSX.utils.json_to_sheet(data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'ChiTieuQuyLop');
+    XLSX.writeFile(wb, `ChiTieuQuyLop.xlsx`);
+  };
+
   const handleToggleFeePayment = async (studentId: string, feeItemId: string, currentStatus: boolean) => {
     const { error } = await supabase.from('fee_payments').upsert(
       { student_id: studentId, fee_item_id: feeItemId, is_paid: !currentStatus },
@@ -1655,6 +2124,30 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
       fetchData();
     } else {
       alert('Lỗi: ' + error.message);
+    }
+  };
+
+  const handleAddExpense = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!expTitle.trim() || !expAmount) {
+      alert('Vui lòng nhập đầy đủ Nội dung chi và Số tiền!');
+      return;
+    }
+    const { error } = await supabase.from('fee_expenses').insert([
+      { teacher_id: teacher.id, title: expTitle.trim(), amount: Number(expAmount), expense_date: expDate, note: expNote.trim() || null }
+    ]);
+    if (!error) {
+      setExpTitle(''); setExpAmount(''); setExpNote('');
+      fetchData();
+    } else {
+      alert('Lỗi: ' + error.message);
+    }
+  };
+
+  const handleDeleteExpense = async (id: string) => {
+    if (confirm('Xóa khoản chi này?')) {
+      await supabase.from('fee_expenses').delete().eq('id', id);
+      fetchData();
     }
   };
 
@@ -1708,6 +2201,15 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
     }
   };
 
+  const totalCollectedAll = feeItems.reduce((sum, item) => {
+    const paidCount = feePayments.filter(p => p.fee_item_id === item.id && p.is_paid).length;
+    return sum + Number(item.amount) * paidCount;
+  }, 0);
+  const totalExpenseAll = feeExpenses.reduce((sum, e) => sum + Number(e.amount), 0);
+  const fundBalanceAll = totalCollectedAll - totalExpenseAll;
+
+  const weeksWithScores = [...new Set(groupWeeklyScores.map(s => s.week_number))].sort((a, b) => a - b);
+
   return (
     <div className="p-6 max-w-7xl mx-auto space-y-6 text-xs font-sans">
       <div className="bg-white p-6 rounded-2xl border shadow-sm flex justify-between items-center flex-wrap gap-4">
@@ -1718,7 +2220,7 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
         <div className="flex gap-2 flex-wrap">
           <button onClick={() => setActiveTab('students')} className={`px-4 py-2 rounded-xl font-bold transition ${activeTab === 'students' ? 'bg-indigo-600 text-white shadow' : 'bg-slate-100'}`}>👨‍🎓 Danh Sách Học Sinh</button>
           <button onClick={() => setActiveTab('groups')} className={`px-4 py-2 rounded-xl font-bold transition ${activeTab === 'groups' ? 'bg-indigo-600 text-white shadow' : 'bg-slate-100'}`}>🗂️ Phân Chia Tổ & Ban Cán Sự</button>
-          <button onClick={() => setActiveTab('fees')} className={`px-4 py-2 rounded-xl font-bold transition ${activeTab === 'fees' ? 'bg-indigo-600 text-white shadow' : 'bg-slate-100'}`}>💰 Quản Lý Khoản Thu</button>
+          <button onClick={() => setActiveTab('fees')} className={`px-4 py-2 rounded-xl font-bold transition ${activeTab === 'fees' ? 'bg-indigo-600 text-white shadow' : 'bg-slate-100'}`}>💰 Quản Lý Khoản Thu & Quỹ Lớp</button>
           <button onClick={() => setActiveTab('reports')} className={`px-4 py-2 rounded-xl font-bold transition ${activeTab === 'reports' ? 'bg-indigo-600 text-white shadow' : 'bg-slate-100'}`}>📊 Thi Đua & Báo Cáo</button>
           <button onClick={() => setActiveTab('announcements')} className={`px-4 py-2 rounded-xl font-bold transition ${activeTab === 'announcements' ? 'bg-indigo-600 text-white shadow' : 'bg-slate-100'}`}>📢 Thông Báo & Dặn Dò</button>
         </div>
@@ -1813,42 +2315,41 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
           <div className="bg-white p-5 rounded-2xl border shadow-sm space-y-4">
             <div>
               <h2 className="font-bold text-slate-800 text-sm">📌 Phân Chia Học Sinh Theo Tổ (1 - 4)</h2>
-              <p className="text-slate-500 text-[11px] mt-1">Tick chọn học sinh vào Tổ tương ứng. Mỗi học sinh chỉ thuộc 1 Tổ — tick vào Tổ khác sẽ tự động chuyển học sinh sang Tổ đó.</p>
+              <p className="text-slate-500 text-[11px] mt-1">Mỗi học sinh chỉ thuộc 1 Tổ duy nhất. Dùng ô chọn "Chuyển sang Tổ..." ở mỗi học sinh để đổi Tổ — học sinh sẽ biến mất khỏi danh sách Tổ cũ và xuất hiện ngay trong danh sách Tổ mới.</p>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-              {[1, 2, 3, 4].map(groupNum => (
-                <div key={groupNum} className="border rounded-2xl overflow-hidden">
-                  <div className="bg-indigo-600 text-white font-bold px-3 py-2 flex justify-between items-center">
-                    <span>Tổ {groupNum}</span>
-                    <span className="bg-indigo-800/60 px-2 py-0.5 rounded-full text-[10px]">
-                      {students.filter(s => (s.group_number || 1) === groupNum).length} HS
-                    </span>
-                  </div>
-                  <div className="max-h-72 overflow-y-auto divide-y">
-                    {students.map(s => {
-                      const checked = (s.group_number || 1) === groupNum;
-                      return (
-                        <label key={s.id} className={`flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-slate-50 ${checked ? 'bg-indigo-50' : ''}`}>
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            onChange={() => handleAssignGroup(s.id, groupNum)}
-                            className="w-4 h-4 accent-indigo-600"
-                          />
+              {[1, 2, 3, 4].map(groupNum => {
+                const groupMembers = students.filter(s => (s.group_number || 1) === groupNum);
+                return (
+                  <div key={groupNum} className="border rounded-2xl overflow-hidden">
+                    <div className="bg-indigo-600 text-white font-bold px-3 py-2 flex justify-between items-center">
+                      <span>Tổ {groupNum}</span>
+                      <span className="bg-indigo-800/60 px-2 py-0.5 rounded-full text-[10px]">{groupMembers.length} HS</span>
+                    </div>
+                    <div className="max-h-72 overflow-y-auto divide-y">
+                      {groupMembers.map(s => (
+                        <div key={s.id} className="flex items-center gap-2 px-3 py-2 hover:bg-slate-50">
                           <span className="flex-1">
                             <span className="font-mono text-indigo-700 font-bold mr-1">{s.code}</span>
                             {s.full_name}
+                            {s.class_role === 'Tổ trưởng' && (
+                              <span className="ml-1.5 text-[10px] bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded font-bold">Tổ trưởng</span>
+                            )}
                           </span>
-                          {checked && s.class_role === 'Tổ trưởng' && (
-                            <span className="text-[10px] bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded font-bold">Tổ trưởng</span>
-                          )}
-                        </label>
-                      );
-                    })}
-                    {students.length === 0 && <p className="p-3 text-slate-400 italic">Chưa có học sinh trong lớp.</p>}
+                          <select
+                            value={groupNum}
+                            onChange={(e) => handleAssignGroup(s.id, Number(e.target.value))}
+                            className="p-1 border rounded-lg text-[11px] bg-white"
+                          >
+                            {[1, 2, 3, 4].map(g => <option key={g} value={g}>Chuyển sang Tổ {g}</option>)}
+                          </select>
+                        </div>
+                      ))}
+                      {groupMembers.length === 0 && <p className="p-3 text-slate-400 italic">Chưa có học sinh nào trong Tổ này.</p>}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
 
@@ -1910,6 +2411,21 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
 
       {activeTab === 'fees' && (
         <div className="space-y-6">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 text-center">
+              <span className="text-[10px] text-emerald-700 font-bold uppercase block">Tổng Đã Thu</span>
+              <span className="text-xl font-black text-emerald-700">{totalCollectedAll.toLocaleString()} đ</span>
+            </div>
+            <div className="bg-rose-50 border border-rose-200 rounded-2xl p-4 text-center">
+              <span className="text-[10px] text-rose-700 font-bold uppercase block">Tổng Đã Chi</span>
+              <span className="text-xl font-black text-rose-700">{totalExpenseAll.toLocaleString()} đ</span>
+            </div>
+            <div className="bg-indigo-50 border border-indigo-200 rounded-2xl p-4 text-center">
+              <span className="text-[10px] text-indigo-700 font-bold uppercase block">Quỹ Lớp Còn Lại</span>
+              <span className="text-xl font-black text-indigo-700">{fundBalanceAll.toLocaleString()} đ</span>
+            </div>
+          </div>
+
           <div className="bg-white p-5 rounded-2xl border shadow-sm">
             <h2 className="font-bold text-slate-800 text-sm mb-3">Tạo Khoản Thu / Quỹ Lớp Mới</h2>
             <form onSubmit={handleAddFeeItem} className="grid grid-cols-1 md:grid-cols-4 gap-3">
@@ -1939,6 +2455,48 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
                 ))}
               </tbody>
             </table>
+          </div>
+
+          <div className="bg-white p-5 rounded-2xl border shadow-sm space-y-3">
+            <div className="flex justify-between items-center flex-wrap gap-3">
+              <h2 className="font-bold text-slate-800 text-sm flex items-center gap-2"><Receipt className="w-4 h-4 text-rose-600" /> Ghi Nhận Chi Tiêu Quỹ Lớp</h2>
+              <button onClick={handleExportExpenses} className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-2 rounded-xl font-bold">📥 Xuất Excel</button>
+            </div>
+            <form onSubmit={handleAddExpense} className="grid grid-cols-1 md:grid-cols-5 gap-3">
+              <input type="text" required placeholder="Nội dung chi" value={expTitle} onChange={e => setExpTitle(e.target.value)} className="p-2 border rounded-xl md:col-span-2" />
+              <input type="number" required placeholder="Số tiền (VNĐ)" value={expAmount} onChange={e => setExpAmount(e.target.value)} className="p-2 border rounded-xl" />
+              <input type="date" required value={expDate} onChange={e => setExpDate(e.target.value)} className="p-2 border rounded-xl" />
+              <button type="submit" className="bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl shadow">Ghi Nhận Chi</button>
+            </form>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead className="bg-rose-50 font-bold border-b text-rose-800">
+                  <tr>
+                    <th className="p-2 border-r">Ngày Chi</th>
+                    <th className="p-2 border-r">Nội Dung Chi</th>
+                    <th className="p-2 border-r text-right">Số Tiền</th>
+                    <th className="p-2 border-r">Ghi Chú</th>
+                    <th className="p-2 text-center">Thao Tác</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {feeExpenses.map(e => (
+                    <tr key={e.id} className="hover:bg-slate-50">
+                      <td className="p-2 border-r font-mono text-slate-600">{e.expense_date}</td>
+                      <td className="p-2 border-r font-semibold">{e.title}</td>
+                      <td className="p-2 border-r text-right font-bold text-rose-700">{Number(e.amount).toLocaleString()} đ</td>
+                      <td className="p-2 border-r text-slate-500 italic">{e.note || '—'}</td>
+                      <td className="p-2 text-center">
+                        <button onClick={() => handleDeleteExpense(e.id)} className="p-1.5 text-rose-600 hover:bg-rose-50 rounded">
+                          <Trash2 className="w-4 h-4 inline" />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {feeExpenses.length === 0 && <p className="text-slate-400 italic p-3">Chưa có khoản chi nào.</p>}
+            </div>
           </div>
         </div>
       )}
@@ -1998,6 +2556,38 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
               </table>
               {studentRecords.length === 0 && <p className="text-slate-400 italic p-3">Chưa có ghi nhận nào từ Lớp trưởng.</p>}
             </div>
+          </div>
+
+          <div className="bg-white p-5 rounded-2xl border shadow-sm space-y-3">
+            <h2 className="font-bold text-slate-800 text-sm flex items-center gap-2"><Trophy className="w-4 h-4 text-amber-500" /> Bảng Thi Đua Các Tổ Theo Từng Tuần (Lớp trưởng báo cáo)</h2>
+            {weeksWithScores.length === 0 ? (
+              <p className="text-slate-400 italic">Chưa có báo cáo thi đua Tổ nào từ Lớp trưởng.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead className="bg-slate-50 font-bold border-b text-slate-700">
+                    <tr>
+                      <th className="p-2 border-r text-center">Tuần</th>
+                      <th className="p-2 border-r text-center">Tổ 1</th>
+                      <th className="p-2 border-r text-center">Tổ 2</th>
+                      <th className="p-2 border-r text-center">Tổ 3</th>
+                      <th className="p-2 text-center">Tổ 4</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {weeksWithScores.map(week => (
+                      <tr key={week} className="hover:bg-slate-50">
+                        <td className="p-2 border-r text-center font-bold">{week}</td>
+                        {[1, 2, 3, 4].map(g => {
+                          const row = groupWeeklyScores.find(s => s.week_number === week && s.group_number === g);
+                          return <td key={g} className="p-2 border-r last:border-r-0 text-center font-bold text-indigo-700">{row ? row.score : '—'}</td>;
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
 
           <div className="bg-white p-5 rounded-2xl border shadow-sm space-y-3">

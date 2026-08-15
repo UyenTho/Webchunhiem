@@ -133,6 +133,10 @@ export default function App() {
   const [teachers, setTeachers] = useState<Teacher[]>([]);
   const [currentTeacher, setCurrentTeacher] = useState<Teacher | null>(null);
   const [loggedInStudent, setLoggedInStudent] = useState<Student | null>(null);
+  // Token phiên đăng nhập của học sinh/lớp trưởng/thủ quỹ (bcrypt + session
+  // token, KHÔNG còn dùng student.id trực tiếp cho các thao tác dữ liệu —
+  // xem chi tiết trong migration_5_session_token.sql).
+  const [sessionToken, setSessionToken] = useState<string | null>(null);
 
   const fetchTeachers = async () => {
     try {
@@ -143,8 +147,34 @@ export default function App() {
     }
   };
 
+  // Khôi phục phiên đăng nhập học sinh (nếu còn hạn) khi tải lại trang,
+  // để người dùng không bị đăng xuất mỗi khi F5. Token lưu ở sessionStorage
+  // (tự xóa khi đóng tab/trình duyệt) — KHÔNG lưu ở localStorage.
+  const restoreStudentSession = async () => {
+    const savedToken = sessionStorage.getItem('student_session_token');
+    if (!savedToken) return;
+
+    const { data, error } = await supabase.rpc('get_my_student', { p_session_token: savedToken });
+    if (error || !data || !data[0]) {
+      sessionStorage.removeItem('student_session_token');
+      return;
+    }
+
+    const student = data[0] as Student;
+    setLoggedInStudent(student);
+    setSessionToken(savedToken);
+    if (isRole(student.class_role, 'lớp trưởng', 'lop truong')) {
+      setCurrentView('class_leader_portal');
+    } else if (isRole(student.class_role, 'thủ quỹ', 'thu quy')) {
+      setCurrentView('treasurer_portal');
+    } else {
+      setCurrentView('student_portal');
+    }
+  };
+
   useEffect(() => {
     fetchTeachers();
+    restoreStudentSession();
     const { data: listener } = supabase.auth.onAuthStateChange((event) => {
       if (event === 'PASSWORD_RECOVERY') {
         setCurrentView('reset_password');
@@ -155,8 +185,14 @@ export default function App() {
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
+    if (sessionToken) {
+      // Hủy hẳn session ở server, không chỉ xóa ở trình duyệt.
+      await supabase.rpc('student_logout', { p_session_token: sessionToken }).catch(() => {});
+      sessionStorage.removeItem('student_session_token');
+    }
     setCurrentTeacher(null);
     setLoggedInStudent(null);
+    setSessionToken(null);
     setCurrentView('login');
   };
 
@@ -187,8 +223,10 @@ export default function App() {
       {currentView === 'login' && (
         <LoginScreen
           onTeacherLogin={(teacher: Teacher) => { setCurrentTeacher(teacher); setCurrentView('teacher'); }}
-          onStudentLogin={(student: Student) => {
+          onStudentLogin={(student: Student, token: string) => {
             setLoggedInStudent(student);
+            setSessionToken(token);
+            sessionStorage.setItem('student_session_token', token);
             if (isRole(student.class_role, 'lớp trưởng', 'lop truong')) {
               setCurrentView('class_leader_portal');
             } else if (isRole(student.class_role, 'thủ quỹ', 'thu quy')) {
@@ -229,15 +267,15 @@ export default function App() {
         <TeacherDashboard teacher={currentTeacher} />
       )}
 
-      {currentView === 'class_leader_portal' && loggedInStudent && (
-        <ClassLeaderPortal student={loggedInStudent} onSwitchToStudentView={() => setCurrentView('student_portal')} />
+      {currentView === 'class_leader_portal' && loggedInStudent && sessionToken && (
+        <ClassLeaderPortal student={loggedInStudent} sessionToken={sessionToken} onSwitchToStudentView={() => setCurrentView('student_portal')} />
       )}
 
-      {currentView === 'treasurer_portal' && loggedInStudent && (
-        <TreasurerPortal student={loggedInStudent} onSwitchToStudentView={() => setCurrentView('student_portal')} />
+      {currentView === 'treasurer_portal' && loggedInStudent && sessionToken && (
+        <TreasurerPortal student={loggedInStudent} sessionToken={sessionToken} onSwitchToStudentView={() => setCurrentView('student_portal')} />
       )}
 
-      {currentView === 'student_portal' && loggedInStudent && (
+      {currentView === 'student_portal' && loggedInStudent && sessionToken && (
         <div className="space-y-2">
           {isRole(loggedInStudent.class_role, 'lớp trưởng', 'lop truong') && (
             <div className="max-w-5xl mx-auto pt-4 px-4 text-right">
@@ -261,9 +299,11 @@ export default function App() {
           )}
           <StudentPortal
             student={loggedInStudent}
+            sessionToken={sessionToken}
             onRefreshStudent={async () => {
-              const { data } = await supabase.from('students').select('*').eq('id', loggedInStudent.id).maybeSingle();
-              if (data) setLoggedInStudent(data as Student);
+              // Dùng RPC get_my_student với session token (không còn dùng student.id trực tiếp).
+              const { data } = await supabase.rpc('get_my_student', { p_session_token: sessionToken });
+              if (data && data[0]) setLoggedInStudent(data[0] as Student);
             }}
           />
         </div>
@@ -380,10 +420,10 @@ function LoginScreen({ onTeacherLogin, onStudentLogin, onAdminLogin, onForgotPas
     if (!studentCode.trim() || !studentPassword.trim() || !matchedTeacher) return;
     setLoading(true);
 
-    // LƯU Ý QUAN TRỌNG: Hàm RPC "student_login" trong Supabase cần được cập nhật để
-    // nhận thêm tham số p_password và đối chiếu với cột "password" của học sinh
-    // (chỉ trả về kết quả khi MSHS VÀ Mật khẩu đều khớp). Nếu RPC hiện tại chưa hỗ
-    // trợ tham số này, cần sửa lại function trong Supabase (SQL Editor) tương ứng.
+    // Mật khẩu được đối chiếu bằng bcrypt (crypt()) ngay trong hàm RPC, và
+    // hàm này tự tạo 1 session_token mới cho lượt đăng nhập này (xem
+    // migration_5_session_token.sql). App KHÔNG còn dùng student.id trực
+    // tiếp cho các thao tác sau đăng nhập nữa, mà dùng session_token.
     const { data, error: rpcErr } = await supabase.rpc('student_login', {
       p_teacher_id: matchedTeacher.id,
       p_code: studentCode.trim(),
@@ -397,7 +437,8 @@ function LoginScreen({ onTeacherLogin, onStudentLogin, onAdminLogin, onForgotPas
       return;
     }
 
-    onStudentLogin(data[0] as Student);
+    const row = data[0] as Student & { session_token: string };
+    onStudentLogin(row as Student, row.session_token);
   };
 
   return (
@@ -600,7 +641,7 @@ function RegisterWithPaymentScreen({ onSuccess, onCancel }: any) {
 }
 
 // ==================== 3. CỔNG THÔNG TIN DÀNH CHO HỌC SINH ====================
-function StudentPortal({ student, onRefreshStudent }: { student: Student; onRefreshStudent: () => void }) {
+function StudentPortal({ student, sessionToken, onRefreshStudent }: { student: Student; sessionToken: string; onRefreshStudent: () => void }) {
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [feeItems, setFeeItems] = useState<FeeItem[]>([]);
   const [feePayments, setFeePayments] = useState<FeePayment[]>([]);
@@ -645,34 +686,43 @@ function StudentPortal({ student, onRefreshStudent }: { student: Student; onRefr
 
   useEffect(() => {
     fetchStudentData();
-  }, [student.id]);
+  }, [student.id, sessionToken]);
 
+  // LƯU Ý BẢO MẬT: toàn bộ dữ liệu bên dưới được đọc qua các hàm RPC
+  // get_class_*/get_my_* (SECURITY DEFINER) thay vì đọc trực tiếp bảng.
+  // Các hàm này tự tra đúng teacher_id của lớp học sinh này rồi mới trả
+  // dữ liệu, nên học sinh lớp A không thể đọc được dữ liệu của lớp B dù
+  // biết được URL API — xem chi tiết trong migration_4_bao_mat_toan_dien.sql.
   const fetchStudentData = async () => {
     const [annRes, feeRes, payRes, recRes, expRes, scoreRes] = await Promise.all([
-      supabase.from('announcements').select('*').eq('teacher_id', student.teacher_id).order('created_date', { ascending: false }).order('id', { ascending: false }),
-      supabase.from('fee_items').select('*').eq('teacher_id', student.teacher_id),
-      supabase.from('fee_payments').select('*').eq('student_id', student.id),
-      supabase.from('student_records').select('*').eq('student_id', student.id).order('week_number', { ascending: false }),
-      supabase.from('fee_expenses').select('*').eq('teacher_id', student.teacher_id).order('expense_date', { ascending: false }),
-      supabase.from('group_weekly_scores').select('*').eq('teacher_id', student.teacher_id).order('week_number', { ascending: true })
+      supabase.rpc('get_class_announcements', { p_session_token: sessionToken }).order('created_date', { ascending: false }).order('id', { ascending: false }),
+      supabase.rpc('get_class_fee_items', { p_session_token: sessionToken }),
+      supabase.rpc('get_class_fee_payments', { p_session_token: sessionToken }),
+      supabase.rpc('get_my_student_records', { p_session_token: sessionToken }).order('week_number', { ascending: false }),
+      supabase.rpc('get_class_fee_expenses', { p_session_token: sessionToken }).order('expense_date', { ascending: false }),
+      supabase.rpc('get_class_group_weekly_scores', { p_session_token: sessionToken }).order('week_number', { ascending: true })
     ]);
+
+    if (annRes.error) console.error('Lỗi tải thông báo:', annRes.error.message);
+    if (feeRes.error) console.error('Lỗi tải khoản thu:', feeRes.error.message);
+    if (payRes.error) console.error('Lỗi tải lượt nộp tiền:', payRes.error.message);
+    if (recRes.error) console.error('Lỗi tải nhật ký rèn luyện:', recRes.error.message);
+    if (expRes.error) console.error('Lỗi tải khoản chi:', expRes.error.message);
+    if (scoreRes.error) console.error('Lỗi tải điểm thi đua Tổ:', scoreRes.error.message);
 
     if (annRes.data) setAnnouncements(annRes.data as Announcement[]);
     if (feeRes.data) setFeeItems(feeRes.data as FeeItem[]);
-    if (payRes.data) setFeePayments(payRes.data as FeePayment[]);
     if (recRes.data) setRecords(recRes.data as StudentRecord[]);
     if (expRes.data) setFeeExpenses(expRes.data as FeeExpense[]);
     if (scoreRes.data) setGroupScores(scoreRes.data as GroupWeeklyScore[]);
 
-    // Lấy TOÀN BỘ lượt "đã nộp" của cả lớp (không chỉ riêng học sinh này) để tính
-    // Tổng Quỹ Đã Thu hiển thị công khai cho cả lớp.
-    const feeItemIds = (feeRes.data || []).map((f: any) => f.id);
-    if (feeItemIds.length > 0) {
-      const { data: allPayData } = await supabase.from('fee_payments').select('*').in('fee_item_id', feeItemIds).eq('is_paid', true);
-      if (allPayData) setAllFeePayments(allPayData as FeePayment[]);
-    } else {
-      setAllFeePayments([]);
-    }
+    // get_class_fee_payments trả về TOÀN BỘ lượt nộp tiền của cả lớp (để tính
+    // Tổng Quỹ Đã Thu công khai) — tách riêng lượt của CHÍNH học sinh này
+    // (feePayments, dùng để hiển thị "Đã nộp/Chưa nộp" ở bảng cá nhân) và
+    // toàn bộ lượt đã nộp (allFeePayments, dùng để tính tổng quỹ cả lớp).
+    const allPayments = (payRes.data || []) as FeePayment[];
+    setFeePayments(allPayments.filter(p => p.student_id === student.id));
+    setAllFeePayments(allPayments.filter(p => p.is_paid));
   };
 
   // Lớp trưởng có thể gửi lại báo cáo thi đua tuần nhiều lần (mỗi lần gửi tạo 1 dòng thông báo mới).
@@ -699,10 +749,12 @@ function StudentPortal({ student, onRefreshStudent }: { student: Student; onRefr
 
   const handleSaveSurvey = async (e: React.FormEvent) => {
     e.preventDefault();
-    const { error } = await supabase.from('students').update({
-      survey_completed: true,
-      survey_info: surveyData
-    }).eq('id', student.id);
+    // Dùng RPC student_submit_survey thay vì update trực tiếp bảng students
+    // (học sinh không có quyền update trực tiếp sau khi khóa RLS).
+    const { error } = await supabase.rpc('student_submit_survey', {
+      p_session_token: sessionToken,
+      p_survey_info: surveyData,
+    });
 
     if (error) {
       alert('Lỗi lưu khảo sát: ' + error.message);
@@ -713,16 +765,14 @@ function StudentPortal({ student, onRefreshStudent }: { student: Student; onRefr
   };
 
   // Cho phép học sinh TỰ đổi mật khẩu đăng nhập của chính mình (bảo mật hơn khi không phải
-  // nhờ Giáo viên cấp lại). Yêu cầu nhập đúng mật khẩu hiện tại trước khi đổi.
+  // nhờ Giáo viên cấp lại). Việc xác thực mật khẩu hiện tại giờ được thực hiện HOÀN TOÀN
+  // trên server qua RPC student_change_password (đối chiếu bcrypt hash) — trình duyệt
+  // không còn giữ/so sánh mật khẩu dạng chữ thường của học sinh nữa.
   const handleChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();
 
     if (!pwForm.current.trim() || !pwForm.next.trim() || !pwForm.confirm.trim()) {
       alert('Vui lòng nhập đầy đủ Mật khẩu hiện tại, Mật khẩu mới và Nhập lại mật khẩu mới.');
-      return;
-    }
-    if (pwForm.current !== (student.password || '')) {
-      alert('Mật khẩu hiện tại không đúng!');
       return;
     }
     if (pwForm.next.length < 4) {
@@ -739,11 +789,15 @@ function StudentPortal({ student, onRefreshStudent }: { student: Student; onRefr
     }
 
     setPwSaving(true);
-    const { error } = await supabase.from('students').update({ password: pwForm.next.trim() }).eq('id', student.id);
+    const { error } = await supabase.rpc('student_change_password', {
+      p_session_token: sessionToken,
+      p_current_password: pwForm.current,
+      p_new_password: pwForm.next,
+    });
     setPwSaving(false);
 
     if (error) {
-      alert('Lỗi đổi mật khẩu: ' + error.message);
+      alert('Mật khẩu hiện tại không đúng hoặc có lỗi xảy ra: ' + error.message);
       return;
     }
 
@@ -1193,7 +1247,7 @@ function StudentPortal({ student, onRefreshStudent }: { student: Student; onRefr
 }
 
 // ==================== 4. CỔNG BÁO CÁO DÀNH CHO LỚP TRƯỞNG ====================
-function ClassLeaderPortal({ student, onSwitchToStudentView }: { student: Student; onSwitchToStudentView: () => void }) {
+function ClassLeaderPortal({ student, sessionToken, onSwitchToStudentView }: { student: Student; sessionToken: string; onSwitchToStudentView: () => void }) {
   const [classStudents, setClassStudents] = useState<Student[]>([]);
   const [weekNumber, setWeekNumber] = useState<number>(1);
   const [recordDate, setRecordDate] = useState<string>(new Date().toISOString().slice(0, 10));
@@ -1213,13 +1267,18 @@ function ClassLeaderPortal({ student, onSwitchToStudentView }: { student: Studen
 
   useEffect(() => {
     fetchClassData();
-  }, [student.id]);
+  }, [student.id, sessionToken]);
 
+  // Đọc qua RPC get_class_students / get_class_group_weekly_scores thay vì
+  // đọc trực tiếp bảng — đảm bảo Lớp trưởng chỉ thấy đúng dữ liệu lớp mình.
   const fetchClassData = async () => {
     const [stRes, gsRes] = await Promise.all([
-      supabase.from('students').select('*').eq('teacher_id', student.teacher_id).order('code', { ascending: true }),
-      supabase.from('group_weekly_scores').select('*').eq('teacher_id', student.teacher_id).order('week_number', { ascending: true }),
+      supabase.rpc('get_class_students', { p_session_token: sessionToken }).order('code', { ascending: true }),
+      supabase.rpc('get_class_group_weekly_scores', { p_session_token: sessionToken }).order('week_number', { ascending: true }),
     ]);
+
+    if (stRes.error) console.error('Lỗi tải danh sách lớp:', stRes.error.message);
+    if (gsRes.error) console.error('Lỗi tải điểm thi đua Tổ:', gsRes.error.message);
 
     if (stRes.data) setClassStudents(stRes.data as Student[]);
     if (gsRes.data) setScoreHistory(gsRes.data as GroupWeeklyScore[]);
@@ -1247,8 +1306,11 @@ function ClassLeaderPortal({ student, onSwitchToStudentView }: { student: Studen
     }
     const parsedPoints = parseInt(pointsStr, 10) || 1;
 
-    const { error } = await supabase.rpc('leader_add_record', {
-      p_leader_student_id: student.id,
+    // Gọi hàm _secure (dùng session token) thay vì hàm gốc leader_add_record
+    // (hàm gốc vẫn tồn tại nhưng chỉ hàm _secure mới được phép gọi trực tiếp
+    // từ client sau khi khóa lại ở Phần F của migration_5_session_token.sql).
+    const { error } = await supabase.rpc('leader_add_record_secure', {
+      p_session_token: sessionToken,
       p_target_student_id: selectedStudentId,
       p_week_number: weekNumber,
       p_record_date: recordDate,
@@ -1277,8 +1339,9 @@ function ClassLeaderPortal({ student, onSwitchToStudentView }: { student: Studen
     const title = `[THI ĐUA LỚP TUẦN ${weekNumber}]`;
     const summaryText = `📊 BÁO CÁO THI ĐUA TỔ TUẦN ${weekNumber}:\n- Tổ 1: ${g1}đ | Tổ 2: ${g2}đ\n- Tổ 3: ${g3}đ | Tổ 4: ${g4}đ\n\n📝 Ghi chú Lớp trưởng: ${leaderNote || 'Không có'}`;
 
-    const { error } = await supabase.rpc('leader_submit_weekly_report', {
-      p_leader_student_id: student.id,
+    // Gọi hàm _secure (dùng session token) thay vì hàm gốc leader_submit_weekly_report.
+    const { error } = await supabase.rpc('leader_submit_weekly_report_secure', {
+      p_session_token: sessionToken,
       p_week_number: weekNumber,
       p_title: title,
       p_content: summaryText,
@@ -1292,7 +1355,7 @@ function ClassLeaderPortal({ student, onSwitchToStudentView }: { student: Studen
     // Lưu điểm từng Tổ vào bảng có cấu trúc (group_weekly_scores) để GVCN và cả lớp
     // xem được dưới dạng bảng rõ ràng theo từng tuần, thay vì chỉ nằm trong văn bản thông báo.
     const { error: scoreErr } = await supabase.rpc('leader_submit_group_scores', {
-      p_leader_student_id: student.id,
+      p_session_token: sessionToken,
       p_week_number: weekNumber,
       p_group1: g1,
       p_group2: g2,
@@ -1514,7 +1577,7 @@ function ClassLeaderPortal({ student, onSwitchToStudentView }: { student: Studen
 }
 
 // ==================== 4b. CỔNG QUẢN LÝ QUỸ LỚP DÀNH CHO THỦ QUỸ ====================
-function TreasurerPortal({ student, onSwitchToStudentView }: { student: Student; onSwitchToStudentView: () => void }) {
+function TreasurerPortal({ student, sessionToken, onSwitchToStudentView }: { student: Student; sessionToken: string; onSwitchToStudentView: () => void }) {
   const [classStudents, setClassStudents] = useState<Student[]>([]);
   const [feeItems, setFeeItems] = useState<FeeItem[]>([]);
   const [feePayments, setFeePayments] = useState<FeePayment[]>([]);
@@ -1533,25 +1596,26 @@ function TreasurerPortal({ student, onSwitchToStudentView }: { student: Student;
 
   useEffect(() => {
     fetchAll();
-  }, [student.id]);
+  }, [student.id, sessionToken]);
 
+  // Đọc qua RPC get_class_* thay vì đọc trực tiếp bảng — đảm bảo Thủ quỹ
+  // chỉ thấy đúng dữ liệu lớp mình.
   const fetchAll = async () => {
     const [stRes, feeRes, expRes] = await Promise.all([
-      supabase.from('students').select('*').eq('teacher_id', student.teacher_id).order('code', { ascending: true }),
-      supabase.from('fee_items').select('*').eq('teacher_id', student.teacher_id),
-      supabase.from('fee_expenses').select('*').eq('teacher_id', student.teacher_id).order('expense_date', { ascending: false }),
+      supabase.rpc('get_class_students', { p_session_token: sessionToken }).order('code', { ascending: true }),
+      supabase.rpc('get_class_fee_items', { p_session_token: sessionToken }),
+      supabase.rpc('get_class_fee_expenses', { p_session_token: sessionToken }).order('expense_date', { ascending: false }),
     ]);
+
+    if (stRes.error) console.error('Lỗi tải danh sách lớp:', stRes.error.message);
+    if (feeRes.error) console.error('Lỗi tải khoản thu:', feeRes.error.message);
+    if (expRes.error) console.error('Lỗi tải khoản chi:', expRes.error.message);
 
     if (stRes.data) setClassStudents(stRes.data as Student[]);
     if (feeRes.data) {
       setFeeItems(feeRes.data as FeeItem[]);
-      const ids = feeRes.data.map((f: any) => f.id);
-      if (ids.length > 0) {
-        const { data: payData } = await supabase.from('fee_payments').select('*').in('fee_item_id', ids);
-        if (payData) setFeePayments(payData as FeePayment[]);
-      } else {
-        setFeePayments([]);
-      }
+      const { data: payData } = await supabase.rpc('get_class_fee_payments', { p_session_token: sessionToken });
+      if (payData) setFeePayments(payData as FeePayment[]);
     }
     if (expRes.data) setFeeExpenses(expRes.data as FeeExpense[]);
   };
@@ -1563,7 +1627,7 @@ function TreasurerPortal({ student, onSwitchToStudentView }: { student: Student;
       return;
     }
     const { error } = await supabase.rpc('treasurer_add_fee_item', {
-      p_treasurer_student_id: student.id,
+      p_session_token: sessionToken,
       p_title: feeTitle.trim(),
       p_amount: Number(feeAmount),
       p_deadline: feeDeadline || null,
@@ -1578,7 +1642,7 @@ function TreasurerPortal({ student, onSwitchToStudentView }: { student: Student;
 
   const handleTogglePayment = async (targetStudentId: string, feeItemId: string, currentStatus: boolean) => {
     const { error } = await supabase.rpc('treasurer_toggle_payment', {
-      p_treasurer_student_id: student.id,
+      p_session_token: sessionToken,
       p_target_student_id: targetStudentId,
       p_fee_item_id: feeItemId,
       p_is_paid: !currentStatus,
@@ -1593,7 +1657,7 @@ function TreasurerPortal({ student, onSwitchToStudentView }: { student: Student;
   // Đánh dấu 1 khoản thu là "Đã Xong" (đã thu đủ / kết thúc đợt thu) hoặc mở lại "Đang thu"
   const handleToggleFeeCompleted = async (feeItemId: string, currentStatus: boolean) => {
     const { error } = await supabase.rpc('treasurer_toggle_fee_completed', {
-      p_treasurer_student_id: student.id,
+      p_session_token: sessionToken,
       p_fee_item_id: feeItemId,
       p_is_completed: !currentStatus,
     });
@@ -1608,7 +1672,7 @@ function TreasurerPortal({ student, onSwitchToStudentView }: { student: Student;
   const handleDeleteFeeItem = async (feeItemId: string) => {
     if (!confirm('Xóa khoản thu này? Toàn bộ trạng thái đã nộp/chưa nộp của khoản thu này cũng sẽ bị xóa.')) return;
     const { error } = await supabase.rpc('treasurer_delete_fee_item', {
-      p_treasurer_student_id: student.id,
+      p_session_token: sessionToken,
       p_fee_item_id: feeItemId,
     });
     if (error) {
@@ -1623,7 +1687,7 @@ function TreasurerPortal({ student, onSwitchToStudentView }: { student: Student;
   const handleDeleteExpense = async (expenseId: string) => {
     if (!confirm('Xóa khoản chi này?')) return;
     const { error } = await supabase.rpc('treasurer_delete_expense', {
-      p_treasurer_student_id: student.id,
+      p_session_token: sessionToken,
       p_expense_id: expenseId,
     });
     if (error) {
@@ -1640,7 +1704,7 @@ function TreasurerPortal({ student, onSwitchToStudentView }: { student: Student;
       return;
     }
     const { error } = await supabase.rpc('treasurer_add_expense', {
-      p_treasurer_student_id: student.id,
+      p_session_token: sessionToken,
       p_title: expTitle.trim(),
       p_amount: Number(expAmount),
       p_expense_date: expDate,
@@ -2116,11 +2180,14 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
     }
   };
   const handleExportStudents = () => {
+    // LƯU Ý: từ khi mật khẩu học sinh được mã hóa (bcrypt) trong cơ sở dữ liệu,
+    // cột "password" chỉ còn là chuỗi hash — KHÔNG xuất ra Excel nữa (vô nghĩa
+    // và không nên phát tán). Muốn cấp/đổi mật khẩu cho học sinh, dùng nút
+    // "Sửa" ở bảng danh sách học sinh.
     const data = students.map(s => ({
       'MSHS': s.code,
       'Họ và tên': s.full_name,
       'Ngày sinh': s.dob || '',
-      'Mật khẩu': s.password || '',
       'Chức vụ': s.class_role || 'Học sinh',
       'Tổ': s.group_number || 1,
       'Đã khảo sát': s.survey_completed ? 'Có' : 'Chưa',

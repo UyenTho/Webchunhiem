@@ -37,6 +37,7 @@ interface FeeItem {
   title: string;
   amount: number;
   deadline?: string;
+  is_completed?: boolean;
 }
 
 interface FeePayment {
@@ -1091,7 +1092,12 @@ function StudentPortal({ student, onRefreshStudent }: { student: Student; onRefr
                   const isPaid = pay?.is_paid || false;
                   return (
                     <tr key={item.id} className="hover:bg-slate-50">
-                      <td className="p-3 border-r font-semibold text-slate-800">{item.title}</td>
+                      <td className="p-3 border-r font-semibold text-slate-800">
+                        {item.title}
+                        {item.is_completed && (
+                          <span className="ml-1.5 text-[10px] bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded-full font-bold align-middle">✅ Đã Xong</span>
+                        )}
+                      </td>
                       <td className="p-3 border-r text-right font-bold text-indigo-700">{Number(item.amount).toLocaleString()} VNĐ</td>
                       <td className="p-3 border-r text-center text-slate-500 font-medium">{item.deadline || 'Không có'}</td>
                       <td className="p-3 text-center">
@@ -1584,6 +1590,49 @@ function TreasurerPortal({ student, onSwitchToStudentView }: { student: Student;
     fetchAll();
   };
 
+  // Đánh dấu 1 khoản thu là "Đã Xong" (đã thu đủ / kết thúc đợt thu) hoặc mở lại "Đang thu"
+  const handleToggleFeeCompleted = async (feeItemId: string, currentStatus: boolean) => {
+    const { error } = await supabase.rpc('treasurer_toggle_fee_completed', {
+      p_treasurer_student_id: student.id,
+      p_fee_item_id: feeItemId,
+      p_is_completed: !currentStatus,
+    });
+    if (error) {
+      alert('Lỗi cập nhật trạng thái khoản thu: ' + error.message);
+      return;
+    }
+    fetchAll();
+  };
+
+  // Xóa hẳn 1 khoản thu (xóa luôn các lượt đã tick nộp tiền liên quan)
+  const handleDeleteFeeItem = async (feeItemId: string) => {
+    if (!confirm('Xóa khoản thu này? Toàn bộ trạng thái đã nộp/chưa nộp của khoản thu này cũng sẽ bị xóa.')) return;
+    const { error } = await supabase.rpc('treasurer_delete_fee_item', {
+      p_treasurer_student_id: student.id,
+      p_fee_item_id: feeItemId,
+    });
+    if (error) {
+      alert('Lỗi xóa khoản thu: ' + error.message);
+      return;
+    }
+    if (selectedFeeItemId === feeItemId) setSelectedFeeItemId('');
+    fetchAll();
+  };
+
+  // Xóa hẳn 1 khoản chi
+  const handleDeleteExpense = async (expenseId: string) => {
+    if (!confirm('Xóa khoản chi này?')) return;
+    const { error } = await supabase.rpc('treasurer_delete_expense', {
+      p_treasurer_student_id: student.id,
+      p_expense_id: expenseId,
+    });
+    if (error) {
+      alert('Lỗi xóa khoản chi: ' + error.message);
+      return;
+    }
+    fetchAll();
+  };
+
   const handleAddExpense = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!expTitle.trim() || !expAmount) {
@@ -1665,13 +1714,39 @@ function TreasurerPortal({ student, onSwitchToStudentView }: { student: Student;
           </form>
 
           <div className="pt-3 border-t space-y-2">
-            <label className="font-semibold block">Chọn khoản thu để tick danh sách đã nộp:</label>
-            <select value={selectedFeeItemId} onChange={e => setSelectedFeeItemId(e.target.value)} className="w-full p-2 border rounded-xl">
-              <option value="">-- Chọn khoản thu --</option>
-              {feeItems.map(f => <option key={f.id} value={f.id}>{f.title} ({Number(f.amount).toLocaleString()} đ)</option>)}
-            </select>
+            <label className="font-semibold block">Danh sách khoản thu:</label>
+            {feeItems.length === 0 ? (
+              <p className="text-slate-400 italic">Chưa có khoản thu nào.</p>
+            ) : (
+              <div className="space-y-1.5">
+                {feeItems.map(f => (
+                  <div key={f.id} className={`flex items-center gap-2 p-2 rounded-xl border ${f.is_completed ? 'bg-slate-100 border-slate-200' : 'bg-white'}`}>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedFeeItemId(f.id)}
+                      className={`flex-1 text-left ${selectedFeeItemId === f.id ? 'font-black text-emerald-700' : 'font-semibold text-slate-700'}`}
+                    >
+                      {f.title} <span className="text-slate-500 font-normal">({Number(f.amount).toLocaleString()} đ)</span>
+                      {f.is_completed && <span className="ml-1.5 text-[10px] bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded-full font-bold">✅ Đã Xong</span>}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleToggleFeeCompleted(f.id, !!f.is_completed)}
+                      className={`text-[11px] px-2 py-1 rounded-lg font-bold ${f.is_completed ? 'bg-amber-50 text-amber-700 border border-amber-200' : 'bg-emerald-50 text-emerald-700 border border-emerald-200'}`}
+                    >
+                      {f.is_completed ? 'Mở Lại' : '✔ Đã Xong'}
+                    </button>
+                    <button type="button" onClick={() => handleDeleteFeeItem(f.id)} className="p-1.5 text-rose-600 hover:bg-rose-50 rounded">
+                      <Trash2 className="w-4 h-4 inline" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
 
             {selectedFeeItemId && (
+              <div className="space-y-1.5">
+                <p className="text-[11px] text-slate-500 italic">Tick chọn học sinh đã nộp cho khoản thu: <strong>{feeItems.find(f => f.id === selectedFeeItemId)?.title}</strong></p>
               <div className="max-h-72 overflow-y-auto border rounded-xl divide-y">
                 {classStudents.map(s => {
                   const pay = feePayments.find(p => p.student_id === s.id && p.fee_item_id === selectedFeeItemId);
@@ -1697,6 +1772,7 @@ function TreasurerPortal({ student, onSwitchToStudentView }: { student: Student;
                   );
                 })}
                 {classStudents.length === 0 && <p className="p-3 text-slate-400 italic">Lớp chưa có học sinh nào.</p>}
+              </div>
               </div>
             )}
           </div>
@@ -1737,12 +1813,15 @@ function TreasurerPortal({ student, onSwitchToStudentView }: { student: Student;
             ) : (
               <div className="max-h-72 overflow-y-auto space-y-2">
                 {feeExpenses.map(e => (
-                  <div key={e.id} className="p-2.5 bg-rose-50/60 border border-rose-200 rounded-xl flex justify-between items-center">
-                    <div>
+                  <div key={e.id} className="p-2.5 bg-rose-50/60 border border-rose-200 rounded-xl flex justify-between items-center gap-2">
+                    <div className="flex-1">
                       <span className="font-bold text-slate-800">{e.title}</span>
                       <p className="text-[11px] text-slate-500">📅 {e.expense_date} {e.note ? `• ${e.note}` : ''}</p>
                     </div>
-                    <span className="font-black text-rose-700">-{Number(e.amount).toLocaleString()} đ</span>
+                    <span className="font-black text-rose-700 whitespace-nowrap">-{Number(e.amount).toLocaleString()} đ</span>
+                    <button type="button" onClick={() => handleDeleteExpense(e.id)} className="p-1.5 text-rose-600 hover:bg-rose-100 rounded">
+                      <Trash2 className="w-4 h-4 inline" />
+                    </button>
                   </div>
                 ))}
               </div>
@@ -2127,6 +2206,24 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
     }
   };
 
+  // Đánh dấu 1 khoản thu là "Đã Xong" (kết thúc đợt thu) hoặc mở lại "Đang thu"
+  const handleToggleFeeCompleted = async (feeItemId: string, currentStatus: boolean) => {
+    const { error } = await supabase.from('fee_items').update({ is_completed: !currentStatus }).eq('id', feeItemId);
+    if (error) alert('Lỗi cập nhật trạng thái khoản thu: ' + error.message);
+    else fetchData();
+  };
+
+  // Xóa hẳn 1 khoản thu (xóa luôn các lượt đã tick nộp tiền liên quan)
+  const handleDeleteFeeItem = async (feeItemId: string) => {
+    if (!confirm('Xóa khoản thu này? Toàn bộ trạng thái đã nộp/chưa nộp của khoản thu này cũng sẽ bị xóa.')) return;
+    const { error: payErr } = await supabase.from('fee_payments').delete().eq('fee_item_id', feeItemId);
+    if (payErr) { alert('Lỗi xóa dữ liệu nộp tiền liên quan: ' + payErr.message); return; }
+    const { error } = await supabase.from('fee_items').delete().eq('id', feeItemId);
+    if (error) { alert('Lỗi xóa khoản thu: ' + error.message); return; }
+    if (selectedFeeForUnpaid === feeItemId) setSelectedFeeForUnpaid('');
+    fetchData();
+  };
+
   const handleAddExpense = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!expTitle.trim() || !expAmount) {
@@ -2443,6 +2540,8 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
                   <th className="p-3 border-r">Tên Khoản Thu</th>
                   <th className="p-3 border-r text-right">Số Tiền</th>
                   <th className="p-3 border-r text-center">Hạn Hoàn Thành</th>
+                  <th className="p-3 border-r text-center">Trạng Thái</th>
+                  <th className="p-3 text-center">Thao Tác</th>
                 </tr>
               </thead>
               <tbody className="divide-y text-slate-700">
@@ -2451,10 +2550,29 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
                     <td className="p-3 border-r font-bold">{f.title}</td>
                     <td className="p-3 border-r text-right font-bold text-indigo-700">{Number(f.amount).toLocaleString()} VNĐ</td>
                     <td className="p-3 border-r text-center">{f.deadline || 'Không có'}</td>
+                    <td className="p-3 border-r text-center">
+                      {f.is_completed ? (
+                        <span className="bg-slate-200 text-slate-600 px-2.5 py-1 rounded-full font-bold">✅ Đã Xong</span>
+                      ) : (
+                        <span className="bg-amber-100 text-amber-800 px-2.5 py-1 rounded-full font-bold">⏳ Đang Thu</span>
+                      )}
+                    </td>
+                    <td className="p-3 text-center space-x-1">
+                      <button
+                        onClick={() => handleToggleFeeCompleted(f.id, !!f.is_completed)}
+                        className={`px-2.5 py-1 rounded-lg font-bold ${f.is_completed ? 'bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100' : 'bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100'}`}
+                      >
+                        {f.is_completed ? 'Mở Lại' : '✔ Đã Xong'}
+                      </button>
+                      <button onClick={() => handleDeleteFeeItem(f.id)} className="p-1.5 text-rose-600 hover:bg-rose-50 rounded">
+                        <Trash2 className="w-4 h-4 inline" />
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
+            {feeItems.length === 0 && <p className="text-slate-400 italic p-3">Chưa có khoản thu nào.</p>}
           </div>
 
           <div className="bg-white p-5 rounded-2xl border shadow-sm space-y-3">

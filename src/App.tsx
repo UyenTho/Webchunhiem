@@ -184,12 +184,24 @@ export default function App() {
   }, []);
 
   const handleLogout = async () => {
-    await supabase.auth.signOut();
+    // Bọc try/finally: dù supabase.auth.signOut() hoặc RPC student_logout gặp
+    // lỗi mạng/khác, trạng thái đăng nhập vẫn PHẢI được xóa và quay về màn
+    // hình login — không để một bước lỗi làm treo cả nút Đăng Xuất.
+    try {
+      await supabase.auth.signOut();
+    } catch (err) {
+      console.error('Lỗi đăng xuất GVCN (bỏ qua, vẫn tiếp tục đăng xuất):', err);
+    }
+
     if (sessionToken) {
-      // Hủy hẳn session ở server, không chỉ xóa ở trình duyệt.
-      await supabase.rpc('student_logout', { p_session_token: sessionToken }).catch(() => {});
+      try {
+        await supabase.rpc('student_logout', { p_session_token: sessionToken });
+      } catch (err) {
+        console.error('Lỗi hủy session học sinh (bỏ qua, vẫn tiếp tục đăng xuất):', err);
+      }
       sessionStorage.removeItem('student_session_token');
     }
+
     setCurrentTeacher(null);
     setLoggedInStudent(null);
     setSessionToken(null);

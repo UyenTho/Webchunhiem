@@ -693,16 +693,44 @@ function StudentPortal({ student, sessionToken, onRefreshStudent }: { student: S
     personality: '',
     hobbies: '',
     teacher_expectations: '',
-    secret_message: '',
-    family_difficulties: '',
-    family_share: '',
-    support_request: '',
-    home_comfort_level: 'Rất tốt',
-    scholarship_need: '',
-    scholarship_specific_need: '',
-    difficulty_and_effort: '',
-    private_family_note: ''
+    secret_message: ''
   });
+
+  // "Góc Chia Sẻ" tách RIÊNG khỏi phiếu khảo sát đầu năm — luôn hiển thị,
+  // không phụ thuộc student.survey_completed, để học sinh đã khảo sát rồi
+  // vẫn chia sẻ/cập nhật được bất cứ lúc nào. Khởi tạo từ dữ liệu đã lưu
+  // trước đó (nếu có) trong survey_info.
+  const [sharingData, setSharingData] = useState({
+    family_difficulties: student.survey_info?.family_difficulties || '',
+    family_share: student.survey_info?.family_share || '',
+    support_request: student.survey_info?.support_request || '',
+    home_comfort_level: student.survey_info?.home_comfort_level || 'Rất tốt',
+    scholarship_need: student.survey_info?.scholarship_need || '',
+    scholarship_specific_need: student.survey_info?.scholarship_specific_need || '',
+    difficulty_and_effort: student.survey_info?.difficulty_and_effort || '',
+    private_family_note: student.survey_info?.private_family_note || '',
+  });
+  const [sharingSaving, setSharingSaving] = useState(false);
+  const [sharingSaved, setSharingSaved] = useState(false);
+
+  const handleSubmitSharing = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSharingSaving(true);
+    // student_submit_sharing GỘP (merge) dữ liệu này vào survey_info hiện có,
+    // KHÔNG ghi đè các phần khác của phiếu khảo sát và KHÔNG đụng tới cờ
+    // survey_completed — cho phép chia sẻ độc lập, gửi lại nhiều lần.
+    const { error } = await supabase.rpc('student_submit_sharing', {
+      p_session_token: sessionToken,
+      p_sharing_info: sharingData,
+    });
+    setSharingSaving(false);
+    if (error) {
+      alert('Lỗi gửi Góc Chia Sẻ: ' + error.message);
+      return;
+    }
+    setSharingSaved(true);
+    onRefreshStudent();
+  };
 
   useEffect(() => {
     fetchStudentData();
@@ -1071,69 +1099,6 @@ function StudentPortal({ student, sessionToken, onRefreshStudent }: { student: S
               </div>
             </div>
 
-            <div className="font-bold text-indigo-800 border-b pb-1 pt-2">5. Góc Chia Sẻ</div>
-            <p className="text-slate-500 italic -mt-1">Mục này để em chia sẻ thêm với thầy/cô, hoàn toàn không bắt buộc và chỉ thầy/cô chủ nhiệm mới xem được.</p>
-            <div className="space-y-2">
-              <div>
-                <label className="font-semibold block mb-1">Gia đình em có đang gặp khó khăn nào về điều kiện học tập không? (Phương tiện đi lại, góc học tập ở nhà, tài liệu học tập, thiết bị kết nối internet...):</label>
-                <textarea rows={2} placeholder="Nếu có, em hãy chia sẻ để thầy/cô hỗ trợ..." value={surveyData.family_difficulties} onChange={e => setSurveyData({ ...surveyData, family_difficulties: e.target.value })} className="w-full p-2 border rounded-xl" />
-              </div>
-              <div>
-                <label className="font-semibold block mb-1">Có điều gì về gia đình mà em muốn thầy/cô biết để hỗ trợ em tốt hơn trong năm học này không?</label>
-                <textarea rows={2} placeholder="Chia sẻ của em (nếu có)..." value={surveyData.family_share} onChange={e => setSurveyData({ ...surveyData, family_share: e.target.value })} className="w-full p-2 border rounded-xl" />
-              </div>
-              <div>
-                <label className="font-semibold block mb-1">Em có nguyện vọng nhận hỗ trợ về học bổng, sách vở hay góc tư vấn riêng không?</label>
-                <textarea rows={2} placeholder="Chia sẻ nguyện vọng của em (nếu có)..." value={surveyData.support_request} onChange={e => setSurveyData({ ...surveyData, support_request: e.target.value })} className="w-full p-2 border rounded-xl" />
-              </div>
-              <div>
-                <label className="font-semibold block mb-1">Mức độ an tâm/thoải mái của em khi ở nhà hiện tại:</label>
-                <select value={surveyData.home_comfort_level} onChange={e => setSurveyData({ ...surveyData, home_comfort_level: e.target.value })} className="w-full p-2 border rounded-xl">
-                  <option value="Rất tốt">Rất tốt</option>
-                  <option value="Bình thường">Bình thường</option>
-                  <option value="Thỉnh thoảng có áp lực">Thỉnh thoảng có áp lực</option>
-                  <option value="Rất áp lực">Rất áp lực</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="font-semibold block mb-1.5">Trong năm học này, nhà trường và các nhà hảo tâm có một số suất học bổng/gói hỗ trợ dành cho học sinh có tinh thần vượt khó. Em có nghĩ hoàn cảnh hiện tại của mình cần sự đồng hành này không?</label>
-                <div className="space-y-1.5">
-                  {[
-                    'Rất cần để giảm bớt gánh nặng cho gia đình',
-                    'Cần hỗ trợ một phần (sách vở, đồ dùng học tập, phương tiện)',
-                    'Hiện tại gia đình em vẫn tự thu xếp ổn định',
-                  ].map(option => (
-                    <label key={option} className="flex items-center gap-2 p-2 border rounded-xl cursor-pointer hover:bg-slate-50">
-                      <input
-                        type="radio"
-                        name="scholarship_need"
-                        checked={surveyData.scholarship_need === option}
-                        onChange={() => setSurveyData({ ...surveyData, scholarship_need: option })}
-                        className="w-4 h-4 accent-indigo-600"
-                      />
-                      <span>{option}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <label className="font-semibold block mb-1">Nếu nhận được một suất học bổng hoặc sự hỗ trợ từ trường, điều đó sẽ giúp em và gia đình giải quyết khó khăn cụ thể nào nhất?</label>
-                <textarea rows={2} placeholder="Chia sẻ của em (nếu có)..." value={surveyData.scholarship_specific_need} onChange={e => setSurveyData({ ...surveyData, scholarship_specific_need: e.target.value })} className="w-full p-2 border rounded-xl" />
-              </div>
-
-              <div>
-                <label className="font-semibold block mb-1">Thầy cô rất trân trọng nỗ lực vượt khó của các em. Hãy chia sẻ ngắn gọn về một khó khăn mà em/gia đình đang đối mặt và cách em đang cố gắng vượt qua mỗi ngày:</label>
-                <textarea rows={2} placeholder="Chia sẻ của em (nếu có)..." value={surveyData.difficulty_and_effort} onChange={e => setSurveyData({ ...surveyData, difficulty_and_effort: e.target.value })} className="w-full p-2 border rounded-xl" />
-              </div>
-
-              <div>
-                <label className="font-semibold block mb-1">Có điều gì đặc biệt về gia đình mà em thấy khó nói trước đám đông, nhưng muốn thầy/cô chủ nhiệm biết để chủ động đề xuất hỗ trợ khi có cơ hội phù hợp không?</label>
-                <textarea rows={2} placeholder="Chia sẻ riêng của em (nếu có)..." value={surveyData.private_family_note} onChange={e => setSurveyData({ ...surveyData, private_family_note: e.target.value })} className="w-full p-2 border rounded-xl" />
-              </div>
-            </div>
-
             <button type="submit" className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow transition">
               Nộp Phiếu Thông Tin Khảo Sát
             </button>
@@ -1298,6 +1263,82 @@ function StudentPortal({ student, sessionToken, onRefreshStudent }: { student: S
             </div>
           </div>
         )}
+      </div>
+
+      <div className="bg-gradient-to-br from-amber-50 via-orange-50 to-white p-5 rounded-2xl border border-amber-200 shadow-sm space-y-4">
+        <div>
+          <h2 className="text-sm font-bold text-amber-900 flex items-center gap-2 border-b border-amber-200 pb-2">
+            💛 Góc Chia Sẻ
+          </h2>
+          <p className="text-slate-600 mt-1.5 leading-relaxed">
+            Mục này để em chia sẻ với thầy/cô chủ nhiệm về hoàn cảnh gia đình, khó khăn trong học tập, hoặc nguyện vọng nhận hỗ trợ (học bổng, sách vở...). Hoàn toàn không bắt buộc, em có thể gửi hoặc cập nhật bất cứ lúc nào, và chỉ Giáo viên chủ nhiệm mới xem được.
+          </p>
+        </div>
+
+        <form onSubmit={handleSubmitSharing} className="space-y-3 bg-white p-4 rounded-xl border border-amber-100">
+          <div>
+            <label className="font-semibold block mb-1">Gia đình em có đang gặp khó khăn nào về điều kiện học tập không? (Phương tiện đi lại, góc học tập ở nhà, tài liệu học tập, thiết bị kết nối internet...):</label>
+            <textarea rows={2} placeholder="Nếu có, em hãy chia sẻ để thầy/cô hỗ trợ..." value={sharingData.family_difficulties} onChange={e => { setSharingData({ ...sharingData, family_difficulties: e.target.value }); setSharingSaved(false); }} className="w-full p-2 border rounded-xl" />
+          </div>
+          <div>
+            <label className="font-semibold block mb-1">Có điều gì về gia đình mà em muốn thầy/cô biết để hỗ trợ em tốt hơn trong năm học này không?</label>
+            <textarea rows={2} placeholder="Chia sẻ của em (nếu có)..." value={sharingData.family_share} onChange={e => { setSharingData({ ...sharingData, family_share: e.target.value }); setSharingSaved(false); }} className="w-full p-2 border rounded-xl" />
+          </div>
+          <div>
+            <label className="font-semibold block mb-1">Em có nguyện vọng nhận hỗ trợ về học bổng, sách vở hay góc tư vấn riêng không?</label>
+            <textarea rows={2} placeholder="Chia sẻ nguyện vọng của em (nếu có)..." value={sharingData.support_request} onChange={e => { setSharingData({ ...sharingData, support_request: e.target.value }); setSharingSaved(false); }} className="w-full p-2 border rounded-xl" />
+          </div>
+          <div>
+            <label className="font-semibold block mb-1">Mức độ an tâm/thoải mái của em khi ở nhà hiện tại:</label>
+            <select value={sharingData.home_comfort_level} onChange={e => { setSharingData({ ...sharingData, home_comfort_level: e.target.value }); setSharingSaved(false); }} className="w-full p-2 border rounded-xl">
+              <option value="Rất tốt">Rất tốt</option>
+              <option value="Bình thường">Bình thường</option>
+              <option value="Thỉnh thoảng có áp lực">Thỉnh thoảng có áp lực</option>
+              <option value="Rất áp lực">Rất áp lực</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="font-semibold block mb-1.5">Trong năm học này, nhà trường và các nhà hảo tâm có một số suất học bổng/gói hỗ trợ dành cho học sinh có tinh thần vượt khó. Em có nghĩ hoàn cảnh hiện tại của mình cần sự đồng hành này không?</label>
+            <div className="space-y-1.5">
+              {[
+                'Rất cần để giảm bớt gánh nặng cho gia đình',
+                'Cần hỗ trợ một phần (sách vở, đồ dùng học tập, phương tiện)',
+                'Hiện tại gia đình em vẫn tự thu xếp ổn định',
+              ].map(option => (
+                <label key={option} className="flex items-center gap-2 p-2 border rounded-xl cursor-pointer hover:bg-slate-50">
+                  <input
+                    type="radio"
+                    name="scholarship_need"
+                    checked={sharingData.scholarship_need === option}
+                    onChange={() => { setSharingData({ ...sharingData, scholarship_need: option }); setSharingSaved(false); }}
+                    className="w-4 h-4 accent-amber-600"
+                  />
+                  <span>{option}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <label className="font-semibold block mb-1">Nếu nhận được một suất học bổng hoặc sự hỗ trợ từ trường, điều đó sẽ giúp em và gia đình giải quyết khó khăn cụ thể nào nhất?</label>
+            <textarea rows={2} placeholder="Chia sẻ của em (nếu có)..." value={sharingData.scholarship_specific_need} onChange={e => { setSharingData({ ...sharingData, scholarship_specific_need: e.target.value }); setSharingSaved(false); }} className="w-full p-2 border rounded-xl" />
+          </div>
+
+          <div>
+            <label className="font-semibold block mb-1">Thầy cô rất trân trọng nỗ lực vượt khó của các em. Hãy chia sẻ ngắn gọn về một khó khăn mà em/gia đình đang đối mặt và cách em đang cố gắng vượt qua mỗi ngày:</label>
+            <textarea rows={2} placeholder="Chia sẻ của em (nếu có)..." value={sharingData.difficulty_and_effort} onChange={e => { setSharingData({ ...sharingData, difficulty_and_effort: e.target.value }); setSharingSaved(false); }} className="w-full p-2 border rounded-xl" />
+          </div>
+
+          <div>
+            <label className="font-semibold block mb-1">Có điều gì đặc biệt về gia đình mà em thấy khó nói trước đám đông, nhưng muốn thầy/cô chủ nhiệm biết để chủ động đề xuất hỗ trợ khi có cơ hội phù hợp không?</label>
+            <textarea rows={2} placeholder="Chia sẻ riêng của em (nếu có)..." value={sharingData.private_family_note} onChange={e => { setSharingData({ ...sharingData, private_family_note: e.target.value }); setSharingSaved(false); }} className="w-full p-2 border rounded-xl" />
+          </div>
+
+          <button type="submit" disabled={sharingSaving} className="w-full py-2.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-xl shadow transition">
+            {sharingSaving ? 'Đang gửi...' : sharingSaved ? '✓ Đã Gửi — Bấm Để Cập Nhật Lại' : 'Gửi Góc Chia Sẻ Này Cho Thầy/Cô'}
+          </button>
+        </form>
       </div>
 
       <div className="bg-white p-5 rounded-2xl border shadow-sm space-y-3">

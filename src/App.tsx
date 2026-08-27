@@ -693,7 +693,15 @@ function StudentPortal({ student, sessionToken, onRefreshStudent }: { student: S
     personality: '',
     hobbies: '',
     teacher_expectations: '',
-    secret_message: ''
+    secret_message: '',
+    family_difficulties: '',
+    family_share: '',
+    support_request: '',
+    home_comfort_level: 'Rất tốt',
+    scholarship_need: '',
+    scholarship_specific_need: '',
+    difficulty_and_effort: '',
+    private_family_note: ''
   });
 
   useEffect(() => {
@@ -1060,6 +1068,69 @@ function StudentPortal({ student, sessionToken, onRefreshStudent }: { student: S
               <div>
                 <label className="font-semibold block mb-1">Thông điệp bí mật (Chỉ thầy/cô biết để hỗ trợ em):</label>
                 <textarea rows={2} placeholder="Những tâm sự thầm kín về hoàn cảnh hoặc bản thân..." value={surveyData.secret_message} onChange={e => setSurveyData({ ...surveyData, secret_message: e.target.value })} className="w-full p-2 border rounded-xl" />
+              </div>
+            </div>
+
+            <div className="font-bold text-indigo-800 border-b pb-1 pt-2">5. Góc Chia Sẻ</div>
+            <p className="text-slate-500 italic -mt-1">Mục này để em chia sẻ thêm với thầy/cô, hoàn toàn không bắt buộc và chỉ thầy/cô chủ nhiệm mới xem được.</p>
+            <div className="space-y-2">
+              <div>
+                <label className="font-semibold block mb-1">Gia đình em có đang gặp khó khăn nào về điều kiện học tập không? (Phương tiện đi lại, góc học tập ở nhà, tài liệu học tập, thiết bị kết nối internet...):</label>
+                <textarea rows={2} placeholder="Nếu có, em hãy chia sẻ để thầy/cô hỗ trợ..." value={surveyData.family_difficulties} onChange={e => setSurveyData({ ...surveyData, family_difficulties: e.target.value })} className="w-full p-2 border rounded-xl" />
+              </div>
+              <div>
+                <label className="font-semibold block mb-1">Có điều gì về gia đình mà em muốn thầy/cô biết để hỗ trợ em tốt hơn trong năm học này không?</label>
+                <textarea rows={2} placeholder="Chia sẻ của em (nếu có)..." value={surveyData.family_share} onChange={e => setSurveyData({ ...surveyData, family_share: e.target.value })} className="w-full p-2 border rounded-xl" />
+              </div>
+              <div>
+                <label className="font-semibold block mb-1">Em có nguyện vọng nhận hỗ trợ về học bổng, sách vở hay góc tư vấn riêng không?</label>
+                <textarea rows={2} placeholder="Chia sẻ nguyện vọng của em (nếu có)..." value={surveyData.support_request} onChange={e => setSurveyData({ ...surveyData, support_request: e.target.value })} className="w-full p-2 border rounded-xl" />
+              </div>
+              <div>
+                <label className="font-semibold block mb-1">Mức độ an tâm/thoải mái của em khi ở nhà hiện tại:</label>
+                <select value={surveyData.home_comfort_level} onChange={e => setSurveyData({ ...surveyData, home_comfort_level: e.target.value })} className="w-full p-2 border rounded-xl">
+                  <option value="Rất tốt">Rất tốt</option>
+                  <option value="Bình thường">Bình thường</option>
+                  <option value="Thỉnh thoảng có áp lực">Thỉnh thoảng có áp lực</option>
+                  <option value="Rất áp lực">Rất áp lực</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="font-semibold block mb-1.5">Trong năm học này, nhà trường và các nhà hảo tâm có một số suất học bổng/gói hỗ trợ dành cho học sinh có tinh thần vượt khó. Em có nghĩ hoàn cảnh hiện tại của mình cần sự đồng hành này không?</label>
+                <div className="space-y-1.5">
+                  {[
+                    'Rất cần để giảm bớt gánh nặng cho gia đình',
+                    'Cần hỗ trợ một phần (sách vở, đồ dùng học tập, phương tiện)',
+                    'Hiện tại gia đình em vẫn tự thu xếp ổn định',
+                  ].map(option => (
+                    <label key={option} className="flex items-center gap-2 p-2 border rounded-xl cursor-pointer hover:bg-slate-50">
+                      <input
+                        type="radio"
+                        name="scholarship_need"
+                        checked={surveyData.scholarship_need === option}
+                        onChange={() => setSurveyData({ ...surveyData, scholarship_need: option })}
+                        className="w-4 h-4 accent-indigo-600"
+                      />
+                      <span>{option}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="font-semibold block mb-1">Nếu nhận được một suất học bổng hoặc sự hỗ trợ từ trường, điều đó sẽ giúp em và gia đình giải quyết khó khăn cụ thể nào nhất?</label>
+                <textarea rows={2} placeholder="Chia sẻ của em (nếu có)..." value={surveyData.scholarship_specific_need} onChange={e => setSurveyData({ ...surveyData, scholarship_specific_need: e.target.value })} className="w-full p-2 border rounded-xl" />
+              </div>
+
+              <div>
+                <label className="font-semibold block mb-1">Thầy cô rất trân trọng nỗ lực vượt khó của các em. Hãy chia sẻ ngắn gọn về một khó khăn mà em/gia đình đang đối mặt và cách em đang cố gắng vượt qua mỗi ngày:</label>
+                <textarea rows={2} placeholder="Chia sẻ của em (nếu có)..." value={surveyData.difficulty_and_effort} onChange={e => setSurveyData({ ...surveyData, difficulty_and_effort: e.target.value })} className="w-full p-2 border rounded-xl" />
+              </div>
+
+              <div>
+                <label className="font-semibold block mb-1">Có điều gì đặc biệt về gia đình mà em thấy khó nói trước đám đông, nhưng muốn thầy/cô chủ nhiệm biết để chủ động đề xuất hỗ trợ khi có cơ hội phù hợp không?</label>
+                <textarea rows={2} placeholder="Chia sẻ riêng của em (nếu có)..." value={surveyData.private_family_note} onChange={e => setSurveyData({ ...surveyData, private_family_note: e.target.value })} className="w-full p-2 border rounded-xl" />
               </div>
             </div>
 
@@ -2963,6 +3034,20 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
                   <p>• <strong>Mong muốn ở GVCN:</strong> {selectedStudentForModal.survey_info.teacher_expectations || 'Không có'}</p>
                   <p className="text-rose-700 bg-rose-50 p-2 rounded-lg font-medium">
                     🔒 <strong>Thông điệp bí mật:</strong> {selectedStudentForModal.survey_info.secret_message || 'Không có'}
+                  </p>
+                </div>
+
+                <div className="bg-amber-50 p-3 rounded-xl space-y-1.5 border border-amber-200">
+                  <h3 className="font-bold text-amber-800 uppercase">5. Góc Chia Sẻ 🔒</h3>
+                  <p>• <strong>Khó khăn về điều kiện học tập:</strong> {selectedStudentForModal.survey_info.family_difficulties || 'Không có'}</p>
+                  <p>• <strong>Điều muốn thầy/cô biết về gia đình:</strong> {selectedStudentForModal.survey_info.family_share || 'Không có'}</p>
+                  <p>• <strong>Nguyện vọng hỗ trợ (học bổng/sách vở/tư vấn):</strong> {selectedStudentForModal.survey_info.support_request || 'Không có'}</p>
+                  <p>• <strong>Mức độ an tâm khi ở nhà:</strong> {selectedStudentForModal.survey_info.home_comfort_level || 'Chưa rõ'}</p>
+                  <p>• <strong>Mức độ cần học bổng/hỗ trợ:</strong> {selectedStudentForModal.survey_info.scholarship_need || 'Chưa chọn'}</p>
+                  <p>• <strong>Khó khăn cụ thể nếu nhận hỗ trợ:</strong> {selectedStudentForModal.survey_info.scholarship_specific_need || 'Không có'}</p>
+                  <p>• <strong>Khó khăn đang đối mặt & nỗ lực vượt qua:</strong> {selectedStudentForModal.survey_info.difficulty_and_effort || 'Không có'}</p>
+                  <p className="text-rose-700 bg-rose-50 p-2 rounded-lg font-medium">
+                    🔒 <strong>Điều khó nói trước đám đông (chỉ GVCN biết):</strong> {selectedStudentForModal.survey_info.private_family_note || 'Không có'}
                   </p>
                 </div>
               </div>

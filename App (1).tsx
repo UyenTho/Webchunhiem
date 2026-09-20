@@ -86,6 +86,30 @@ interface StudentRecord {
   created_at?: string;
 }
 
+// ==================== ĐIỂM MIỆNG ====================
+// Cho phép GVCN quản lý điểm miệng của BẤT KỲ lớp nào mình dạy (không nhất
+// thiết là lớp chủ nhiệm) — mỗi lớp có 1 danh sách học sinh riêng, nhập từ
+// Excel, độc lập với bảng "students" (lớp chủ nhiệm) đã có.
+interface OralGradeClass {
+  id: string;
+  teacher_id: string;
+  class_name: string;
+}
+
+interface OralGradeStudent {
+  id: string;
+  class_id: string;
+  full_name: string;
+}
+
+interface OralGradeRecord {
+  id: string;
+  class_id: string;
+  student_id: string;
+  grade_date: string;
+  score: number;
+}
+
 type ViewType =
   | 'login' | 'forgot_password' | 'reset_password' | 'register_payment'
   | 'admin' | 'teacher' | 'student_portal' | 'class_leader_portal' | 'treasurer_portal';
@@ -2129,8 +2153,279 @@ function TreasurerPortal({ student, sessionToken, onSwitchToStudentView }: { stu
 }
 
 // ==================== 5. BẢNG ĐIỀU KHIỂN GIÁO VIÊN CHỦ NHIỆM ====================
+// ==================== TAB ĐIỂM MIỆNG (BẤT KỲ LỚP DẠY NÀO) ====================
+function OralGradesTab({ teacher }: { teacher: Teacher }) {
+  const [classes, setClasses] = useState<OralGradeClass[]>([]);
+  const [selectedClassId, setSelectedClassId] = useState('');
+  const [newClassName, setNewClassName] = useState('');
+  const [students, setStudents] = useState<OralGradeStudent[]>([]);
+  const [records, setRecords] = useState<OralGradeRecord[]>([]);
+  const [importing, setImporting] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const [entryStudentId, setEntryStudentId] = useState('');
+  const [entryDate, setEntryDate] = useState(new Date().toISOString().slice(0, 10));
+  const [entryScore, setEntryScore] = useState('');
+
+  useEffect(() => { fetchClasses(); }, [teacher.id]);
+  useEffect(() => {
+    if (selectedClassId) fetchClassData();
+    else { setStudents([]); setRecords([]); }
+  }, [selectedClassId]);
+
+  const fetchClasses = async () => {
+    const { data, error } = await supabase.from('oral_grade_classes').select('*').eq('teacher_id', teacher.id).order('class_name', { ascending: true });
+    if (error) { console.error('Lỗi tải danh sách lớp điểm miệng:', error.message); return; }
+    if (data) {
+      setClasses(data as OralGradeClass[]);
+      if (!selectedClassId && data.length > 0) setSelectedClassId(data[0].id);
+    }
+  };
+
+  const fetchClassData = async () => {
+    const [stRes, recRes] = await Promise.all([
+      supabase.from('oral_grade_students').select('*').eq('class_id', selectedClassId).order('full_name', { ascending: true }),
+      supabase.from('oral_grade_records').select('*').eq('class_id', selectedClassId).order('grade_date', { ascending: false }),
+    ]);
+    if (stRes.data) setStudents(stRes.data as OralGradeStudent[]);
+    if (recRes.data) setRecords(recRes.data as OralGradeRecord[]);
+  };
+
+  const handleCreateClass = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newClassName.trim()) return;
+    const { data, error } = await supabase.from('oral_grade_classes')
+      .insert([{ teacher_id: teacher.id, class_name: newClassName.trim() }])
+      .select()
+      .single();
+    if (error) { alert('Lỗi tạo lớp: ' + error.message); return; }
+    setNewClassName('');
+    await fetchClasses();
+    if (data) setSelectedClassId((data as OralGradeClass).id);
+  };
+
+  const handleDeleteClass = async (id: string) => {
+    if (!confirm('Xóa lớp này? Toàn bộ danh sách học sinh và điểm miệng của lớp sẽ bị xóa theo.')) return;
+    const { error } = await supabase.from('oral_grade_classes').delete().eq('id', id);
+    if (error) { alert('Lỗi xóa lớp: ' + error.message); return; }
+    if (selectedClassId === id) setSelectedClassId('');
+    fetchClasses();
+  };
+
+  const handleImportExcel = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !selectedClassId) return;
+    setImporting(true);
+    try {
+      const buf = await file.arrayBuffer();
+      const workbook = XLSX.read(buf, { cellDates: true });
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      const rows: any[] = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+
+      const names = rows
+        .map(r => String(r['Họ và tên'] || r['Họ tên'] || r['Ho va ten'] || '').trim())
+        .filter(Boolean);
+
+      if (names.length === 0) {
+        alert('Không đọc được cột "Họ và tên" trong file. Kiểm tra lại tên cột trong file Excel.');
+        setImporting(false);
+        if (fileInputRef.current) fileInputRef.current.value = '';
+        return;
+      }
+
+      const payload = names.map(full_name => ({ class_id: selectedClassId, full_name }));
+      const { error } = await supabase.from('oral_grade_students').insert(payload);
+      if (error) {
+        alert('Lỗi nhập danh sách: ' + error.message);
+      } else {
+        alert(`Đã nhập ${names.length} học sinh vào lớp!`);
+        fetchClassData();
+      }
+    } catch (err: any) {
+      alert('Lỗi đọc file Excel: ' + err.message);
+    } finally {
+      setImporting(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const handleDeleteStudent = async (id: string) => {
+    if (!confirm('Xóa học sinh này khỏi danh sách? Điểm miệng đã nhập của học sinh này cũng sẽ bị xóa.')) return;
+    await supabase.from('oral_grade_students').delete().eq('id', id);
+    fetchClassData();
+  };
+
+  const handleAddRecord = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!entryStudentId || !entryDate || entryScore === '') {
+      alert('Vui lòng chọn học sinh, nhập ngày tháng và điểm.');
+      return;
+    }
+    const scoreNum = Number(entryScore);
+    if (isNaN(scoreNum) || scoreNum < 0 || scoreNum > 10) {
+      alert('Điểm phải là số từ 0 đến 10.');
+      return;
+    }
+    const { error } = await supabase.from('oral_grade_records').insert([
+      { class_id: selectedClassId, student_id: entryStudentId, grade_date: entryDate, score: scoreNum }
+    ]);
+    if (error) { alert('Lỗi lưu điểm: ' + error.message); return; }
+    setEntryScore('');
+    fetchClassData();
+  };
+
+  const handleDeleteRecord = async (id: string) => {
+    if (!confirm('Xóa điểm miệng này?')) return;
+    await supabase.from('oral_grade_records').delete().eq('id', id);
+    fetchClassData();
+  };
+
+  const handleExportRecords = () => {
+    const cls = classes.find(c => c.id === selectedClassId);
+    const data = records.map(r => {
+      const st = students.find(s => s.id === r.student_id);
+      return { 'Ngày': r.grade_date, 'Họ và tên': st?.full_name || '(đã xóa)', 'Điểm': r.score };
+    });
+    const ws = XLSX.utils.json_to_sheet(data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'DiemMieng');
+    XLSX.writeFile(wb, `DiemMieng_${cls?.class_name || 'Lop'}.xlsx`);
+  };
+
+  const selectedClass = classes.find(c => c.id === selectedClassId);
+
+  return (
+    <div className="space-y-6 text-xs font-sans">
+      <div className="bg-white p-5 rounded-2xl border shadow-sm space-y-3">
+        <div>
+          <h2 className="font-bold text-slate-800 text-sm">Quản Lý Các Lớp Dạy (Điểm Miệng)</h2>
+          <p className="text-slate-500 text-[11px] mt-1">Dùng cho bất kỳ lớp nào thầy/cô đang dạy (không nhất thiết là lớp chủ nhiệm) — mỗi lớp có danh sách học sinh riêng, nhập từ Excel.</p>
+        </div>
+        <form onSubmit={handleCreateClass} className="flex gap-2 flex-wrap">
+          <input type="text" placeholder="Nhập tên lớp (VD: 10A2, 11B1...)" value={newClassName} onChange={e => setNewClassName(e.target.value)} className="p-2 border rounded-xl flex-1 min-w-[200px]" required />
+          <button type="submit" className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-4 py-2 rounded-xl shadow">+ Tạo Lớp</button>
+        </form>
+
+        {classes.length > 0 ? (
+          <div className="flex gap-2 flex-wrap pt-2">
+            {classes.map(c => (
+              <div key={c.id} className={`flex items-center gap-1.5 pl-3 pr-2 py-1.5 rounded-xl font-bold ${selectedClassId === c.id ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-700'}`}>
+                <button type="button" onClick={() => setSelectedClassId(c.id)}>{c.class_name}</button>
+                <button type="button" onClick={() => handleDeleteClass(c.id)} className={`${selectedClassId === c.id ? 'text-white/70 hover:text-white' : 'text-rose-500 hover:text-rose-700'}`}>
+                  <Trash2 className="w-3.5 h-3.5 inline" />
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-slate-400 italic">Chưa có lớp nào — tạo lớp mới ở trên để bắt đầu.</p>
+        )}
+      </div>
+
+      {selectedClassId && (
+        <>
+          <div className="bg-white p-5 rounded-2xl border shadow-sm flex justify-between items-center flex-wrap gap-3">
+            <div>
+              <h2 className="font-bold text-slate-800 text-sm">Danh Sách Học Sinh — Lớp {selectedClass?.class_name}</h2>
+              <p className="text-slate-500 text-[11px] mt-1">File Excel cần có cột "Họ và tên".</p>
+            </div>
+            <div className="flex gap-2">
+              <input ref={fileInputRef} type="file" accept=".xlsx,.xls" onChange={handleImportExcel} className="hidden" id="oral-excel-import" />
+              <label htmlFor="oral-excel-import" className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl font-bold cursor-pointer shadow">
+                {importing ? 'Đang nhập...' : '📤 Đẩy Danh Sách Từ Excel'}
+              </label>
+            </div>
+          </div>
+
+          <div className="bg-white p-5 rounded-2xl border shadow-sm space-y-3">
+            <h2 className="font-bold text-slate-800 text-sm">Nhập Điểm Miệng</h2>
+            {students.length === 0 ? (
+              <p className="text-slate-400 italic">Lớp chưa có học sinh — đẩy danh sách từ Excel ở trên trước.</p>
+            ) : (
+              <form onSubmit={handleAddRecord} className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                <select value={entryStudentId} onChange={e => setEntryStudentId(e.target.value)} className="p-2 border rounded-xl md:col-span-2" required>
+                  <option value="">-- Chọn học sinh --</option>
+                  {students.map(s => <option key={s.id} value={s.id}>{s.full_name}</option>)}
+                </select>
+                <input type="date" value={entryDate} onChange={e => setEntryDate(e.target.value)} className="p-2 border rounded-xl" required />
+                <input type="number" min="0" max="10" step="0.1" placeholder="Điểm (0-10)" value={entryScore} onChange={e => setEntryScore(e.target.value)} className="p-2 border rounded-xl" required />
+                <button type="submit" className="md:col-span-4 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl py-2.5 shadow">Lưu Điểm</button>
+              </form>
+            )}
+          </div>
+
+          <div className="bg-white p-5 rounded-2xl border shadow-sm space-y-3">
+            <div className="flex justify-between items-center flex-wrap gap-3">
+              <h2 className="font-bold text-slate-800 text-sm">Bảng Điểm Miệng Đã Nhập</h2>
+              <button onClick={handleExportRecords} className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-2 rounded-xl font-bold">📥 Xuất Excel</button>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead className="bg-slate-50 font-bold border-b text-slate-700">
+                  <tr>
+                    <th className="p-2 border-r">Ngày Tháng</th>
+                    <th className="p-2 border-r">Họ và Tên</th>
+                    <th className="p-2 border-r text-center">Điểm</th>
+                    <th className="p-2 text-center">Thao Tác</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {records.map(r => {
+                    const st = students.find(s => s.id === r.student_id);
+                    return (
+                      <tr key={r.id} className="hover:bg-slate-50">
+                        <td className="p-2 border-r font-mono">{r.grade_date}</td>
+                        <td className="p-2 border-r font-semibold">{st?.full_name || '(đã xóa)'}</td>
+                        <td className="p-2 border-r text-center font-bold text-indigo-700">{r.score}</td>
+                        <td className="p-2 text-center">
+                          <button onClick={() => handleDeleteRecord(r.id)} className="p-1.5 text-rose-600 hover:bg-rose-50 rounded">
+                            <Trash2 className="w-4 h-4 inline" />
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              {records.length === 0 && <p className="text-slate-400 italic p-3">Chưa có điểm miệng nào được nhập.</p>}
+            </div>
+          </div>
+
+          <div className="bg-white rounded-2xl border shadow-sm overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead className="bg-slate-50 font-bold border-b text-slate-700">
+                <tr>
+                  <th className="p-3 border-r">Họ và Tên</th>
+                  <th className="p-3 border-r text-center">Số Lần Đã Nhập Điểm</th>
+                  <th className="p-3 text-center">Thao Tác</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {students.map(s => (
+                  <tr key={s.id} className="hover:bg-slate-50">
+                    <td className="p-3 border-r font-semibold">{s.full_name}</td>
+                    <td className="p-3 border-r text-center">{records.filter(r => r.student_id === s.id).length}</td>
+                    <td className="p-3 text-center">
+                      <button onClick={() => handleDeleteStudent(s.id)} className="p-1.5 text-rose-600 hover:bg-rose-50 rounded">
+                        <Trash2 className="w-4 h-4 inline" />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+                {students.length === 0 && (
+                  <tr><td colSpan={3} className="p-3 text-slate-400 italic">Chưa có học sinh nào.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function TeacherDashboard({ teacher }: { teacher: Teacher }) {
-  const [activeTab, setActiveTab] = useState<'students' | 'fees' | 'announcements' | 'reports' | 'groups' | 'rules'>('students');
+  const [activeTab, setActiveTab] = useState<'students' | 'fees' | 'announcements' | 'reports' | 'groups' | 'rules' | 'oral_grades'>('students');
   const [students, setStudents] = useState<Student[]>([]);
   const [feeItems, setFeeItems] = useState<FeeItem[]>([]);
   const [feePayments, setFeePayments] = useState<FeePayment[]>([]);
@@ -2618,6 +2913,7 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
           <button onClick={() => setActiveTab('fees')} className={`px-4 py-2 rounded-xl font-bold transition ${activeTab === 'fees' ? 'bg-indigo-600 text-white shadow' : 'bg-slate-100'}`}>💰 Quản Lý Khoản Thu & Quỹ Lớp</button>
           <button onClick={() => setActiveTab('reports')} className={`px-4 py-2 rounded-xl font-bold transition ${activeTab === 'reports' ? 'bg-indigo-600 text-white shadow' : 'bg-slate-100'}`}>📊 Thi Đua & Báo Cáo</button>
           <button onClick={() => setActiveTab('rules')} className={`px-4 py-2 rounded-xl font-bold transition ${activeTab === 'rules' ? 'bg-indigo-600 text-white shadow' : 'bg-slate-100'}`}>📖 Nội Quy Thi Đua</button>
+          <button onClick={() => setActiveTab('oral_grades')} className={`px-4 py-2 rounded-xl font-bold transition ${activeTab === 'oral_grades' ? 'bg-indigo-600 text-white shadow' : 'bg-slate-100'}`}>📝 Điểm Miệng</button>
           <button onClick={() => setActiveTab('announcements')} className={`px-4 py-2 rounded-xl font-bold transition ${activeTab === 'announcements' ? 'bg-indigo-600 text-white shadow' : 'bg-slate-100'}`}>📢 Thông Báo & Dặn Dò</button>
         </div>
       </div>
@@ -3106,6 +3402,10 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
           </div>
           <CompetitionRulesContent />
         </div>
+      )}
+
+      {activeTab === 'oral_grades' && (
+        <OralGradesTab teacher={teacher} />
       )}
 
       {activeTab === 'announcements' && (

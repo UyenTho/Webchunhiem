@@ -86,6 +86,30 @@ interface StudentRecord {
   created_at?: string;
 }
 
+// ==================== ĐIỂM MIỆNG ====================
+// Cho phép GVCN quản lý điểm miệng của BẤT KỲ lớp nào mình dạy (không nhất
+// thiết là lớp chủ nhiệm) — mỗi lớp có 1 danh sách học sinh riêng, nhập từ
+// Excel, độc lập với bảng "students" (lớp chủ nhiệm) đã có.
+interface OralGradeClass {
+  id: string;
+  teacher_id: string;
+  class_name: string;
+}
+
+interface OralGradeStudent {
+  id: string;
+  class_id: string;
+  full_name: string;
+}
+
+interface OralGradeRecord {
+  id: string;
+  class_id: string;
+  student_id: string;
+  grade_date: string;
+  score: number;
+}
+
 type ViewType =
   | 'login' | 'forgot_password' | 'reset_password' | 'register_payment'
   | 'admin' | 'teacher' | 'student_portal' | 'class_leader_portal' | 'treasurer_portal';
@@ -94,33 +118,211 @@ type ViewType =
 // Đồng bộ với Bảng Nội Quy Thi Đua hiển thị cho học sinh (mục II và III trong StudentPortal).
 // Lớp trưởng sẽ CHỌN nội dung từ danh sách này, điểm sẽ tự động điền theo đúng quy định,
 // tránh trường hợp nhập tay sai lệch điểm so với nội quy lớp.
-const COMPETITION_RULES: { type: 'violation' | 'commendation'; content: string; points: number }[] = [
+// Mỗi mục có thêm "category" (lĩnh vực) để tự động gom nhóm hiển thị bảng
+// (gộp ô theo lĩnh vực) ở CẢ trang học sinh, trang GVCN, và file Word xuất
+// ra — chỉ cần sửa DUY NHẤT mảng này, mọi nơi hiển thị tự đồng bộ theo.
+interface CompetitionRule {
+  type: 'violation' | 'commendation';
+  category: string;
+  content: string;
+  points: number;
+}
+
+const COMPETITION_RULES: CompetitionRule[] = [
   // ==== II. BẢNG CỘNG ĐIỂM ====
-  { type: 'commendation', content: 'Đạt điểm 10 trong bài kiểm tra (Miệng, 15 phút, Giữa kỳ, Cuối kỳ)', points: 3 },
-  { type: 'commendation', content: 'Đạt điểm 9 trong bài kiểm tra (Miệng, 15 phút, Giữa kỳ, Cuối kỳ)', points: 2 },
-  { type: 'commendation', content: 'Đạt giải Học sinh giỏi / KHKT / Thể thao cấp Trường (hoặc tương đương)', points: 5 },
-  { type: 'commendation', content: 'Đạt giải Học sinh giỏi / KHKT cấp Tỉnh / Thành phố trở lên', points: 10 },
-  { type: 'commendation', content: 'Ban cán sự lớp (Lớp trưởng, Lớp phó, Cờ đỏ) hoàn thành xuất sắc nhiệm vụ', points: 5 },
-  { type: 'commendation', content: 'Nhặt được của rơi trả lại người mất / Hành động dũng cảm giúp đỡ cộng đồng', points: 5 },
+  { type: 'commendation', category: 'Kiểm tra / Thi', content: 'Đạt điểm 10 trong bài kiểm tra (Miệng, 15 phút, Giữa kỳ, Cuối kỳ)', points: 3 },
+  { type: 'commendation', category: 'Kiểm tra / Thi', content: 'Đạt điểm 9 trong bài kiểm tra (Miệng, 15 phút, Giữa kỳ, Cuối kỳ)', points: 2 },
+  { type: 'commendation', category: 'Thi Đấu / Phong Trào', content: 'Đạt giải Học sinh giỏi / KHKT / Thể thao cấp Trường (hoặc tương đương)', points: 5 },
+  { type: 'commendation', category: 'Thi Đấu / Phong Trào', content: 'Đạt giải Học sinh giỏi / KHKT cấp Tỉnh / Thành phố trở lên', points: 10 },
+  { type: 'commendation', category: 'Đóng Góp Tập Thể', content: 'Ban cán sự lớp (Lớp trưởng, Lớp phó, Cờ đỏ) hoàn thành xuất sắc nhiệm vụ', points: 5 },
+  { type: 'commendation', category: 'Đóng Góp Tập Thể', content: 'Nhặt được của rơi trả lại người mất / Hành động dũng cảm giúp đỡ cộng đồng', points: 5 },
   // ==== III. BẢNG TRỪ ĐIỂM HÀNG TUẦN ====
-  { type: 'violation', content: 'Đi học muộn (sau tiếng trống vào lớp / giờ truy bài)', points: 2 },
-  { type: 'violation', content: 'Bỏ giờ truy bài 15 phút đầu giờ', points: 3 },
-  { type: 'violation', content: 'Nghỉ học không lý do (nghỉ chui)', points: 10 },
-  { type: 'violation', content: 'Trốn tiết / Trốn học giữa giờ', points: 15 },
-  { type: 'violation', content: 'Không làm bài tập về nhà / Không chuẩn bị bài theo yêu cầu GVBM', points: 3 },
-  { type: 'violation', content: 'Không mang sách vở, dụng cụ học tập theo thời khóa biểu', points: 2 },
-  { type: 'violation', content: 'Mất trật tự, làm việc riêng, ngủ gật trong giờ học', points: 2 },
-  { type: 'violation', content: 'Sử dụng điện thoại di động khi chưa có sự cho phép của giáo viên', points: 5 },
-  { type: 'violation', content: 'Gian lận trong kiểm tra, thi cử (quay cóp, sử dụng tài liệu)', points: 20 },
-  { type: 'violation', content: 'Sai đồng phục, không đeo thẻ học sinh, đi dép lê không quai', points: 2 },
-  { type: 'violation', content: 'Nhuộm tóc màu sáng, nhuộm Highlight, nam để tóc quá dài', points: 5 },
-  { type: 'violation', content: 'Trang điểm đậm, sơn móng tay/móng chân màu nổi bật', points: 3 },
-  { type: 'violation', content: 'Hút thuốc lá, thuốc lá điện tử trong trường (hoặc vi phạm ATGT)', points: 20 },
-  { type: 'violation', content: 'Bỏ trực nhật / Trực nhật sơ sài, không đổ rác đúng quy định', points: 5 },
-  { type: 'violation', content: 'Xả rác bừa bãi trong lớp hoặc khuôn viên trường', points: 3 },
-  { type: 'violation', content: 'Nói tục, chửi thề, gây mất đoàn kết nội bộ lớp', points: 5 },
-  { type: 'violation', content: 'Mang đồ ăn, nước ngọt vào sử dụng trong giờ học', points: 2 },
+  { type: 'violation', category: 'Chuyên Cần & Giờ Giấc', content: 'Đi học muộn (sau tiếng trống vào lớp / giờ truy bài)', points: 2 },
+  { type: 'violation', category: 'Chuyên Cần & Giờ Giấc', content: 'Bỏ giờ truy bài 15 phút đầu giờ', points: 3 },
+  { type: 'violation', category: 'Chuyên Cần & Giờ Giấc', content: 'Nghỉ học không lý do (nghỉ chui)', points: 10 },
+  { type: 'violation', category: 'Chuyên Cần & Giờ Giấc', content: 'Trốn tiết / Trốn học giữa giờ', points: 15 },
+  { type: 'violation', category: 'Nề Nếp Học Tập', content: 'Không làm bài tập về nhà / Không chuẩn bị bài theo yêu cầu GVBM', points: 3 },
+  { type: 'violation', category: 'Nề Nếp Học Tập', content: 'Không mang sách vở, dụng cụ học tập theo thời khóa biểu', points: 2 },
+  { type: 'violation', category: 'Nề Nếp Học Tập', content: 'Mất trật tự, làm việc riêng trong giờ học', points: 2 },
+  { type: 'violation', category: 'Nề Nếp Học Tập', content: 'Ngủ trong giờ học', points: 10 },
+  { type: 'violation', category: 'Nề Nếp Học Tập', content: 'Không viết bài / không soạn bài theo yêu cầu của giáo viên', points: 5 },
+  { type: 'violation', category: 'Nề Nếp Học Tập', content: 'Sử dụng điện thoại di động khi chưa có sự cho phép của giáo viên', points: 5 },
+  { type: 'violation', category: 'Nề Nếp Học Tập', content: 'Gian lận trong kiểm tra, thi cử (quay cóp, sử dụng tài liệu)', points: 20 },
+  { type: 'violation', category: 'Trang Phục & Rèn Luyện', content: 'Sai đồng phục, không đeo thẻ học sinh, đi dép lê không quai', points: 2 },
+  { type: 'violation', category: 'Trang Phục & Rèn Luyện', content: 'Nhuộm tóc màu sáng, nhuộm Highlight, nam để tóc quá dài', points: 5 },
+  { type: 'violation', category: 'Trang Phục & Rèn Luyện', content: 'Trang điểm đậm, sơn móng tay/móng chân màu nổi bật', points: 3 },
+  { type: 'violation', category: 'Trang Phục & Rèn Luyện', content: 'Hút thuốc lá, thuốc lá điện tử trong trường (hoặc vi phạm ATGT)', points: 20 },
+  { type: 'violation', category: 'Môi Trường & Văn Hóa', content: 'Bỏ trực nhật / Trực nhật sơ sài, không đổ rác đúng quy định', points: 5 },
+  { type: 'violation', category: 'Môi Trường & Văn Hóa', content: 'Xả rác bừa bãi trong lớp hoặc khuôn viên trường', points: 3 },
+  { type: 'violation', category: 'Môi Trường & Văn Hóa', content: 'Nói tục, chửi thề, gây mất đoàn kết nội bộ lớp', points: 5 },
+  { type: 'violation', category: 'Môi Trường & Văn Hóa', content: 'Mang đồ ăn, nước ngọt vào sử dụng trong giờ học', points: 2 },
 ];
+
+// Gom các mục liên tiếp cùng "category" lại thành 1 nhóm (để hiển thị dạng
+// bảng có ô gộp theo lĩnh vực, giống cách trình bày cũ).
+function groupRulesByCategory(rows: CompetitionRule[]) {
+  const groups: { category: string; items: CompetitionRule[] }[] = [];
+  for (const r of rows) {
+    const last = groups[groups.length - 1];
+    if (last && last.category === r.category) {
+      last.items.push(r);
+    } else {
+      groups.push({ category: r.category, items: [r] });
+    }
+  }
+  return groups;
+}
+
+// ==================== BẢNG NỘI QUY THI ĐUA (DÙNG CHUNG) ====================
+// Component dùng chung cho CẢ trang học sinh và trang GVCN, để nội dung
+// luôn đồng bộ — sửa dữ liệu ở COMPETITION_RULES là tự cập nhật khắp nơi.
+function CompetitionRulesContent() {
+  const commendationGroups = groupRulesByCategory(COMPETITION_RULES.filter(r => r.type === 'commendation'));
+  const violationGroups = groupRulesByCategory(COMPETITION_RULES.filter(r => r.type === 'violation'));
+
+  return (
+    <div className="space-y-4 text-slate-700 leading-relaxed">
+      <h3 className="font-bold text-indigo-800 text-xs uppercase border-l-4 border-indigo-600 pl-2">I. Khung Xếp Loại Rèn Luyện Cuối Học Kỳ</h3>
+      <div className="overflow-x-auto">
+        <table className="w-full text-left border-collapse border border-slate-200">
+          <thead className="bg-indigo-50 font-bold text-indigo-900">
+            <tr>
+              <th className="p-2 border">Mức Điểm Tổng Kết</th>
+              <th className="p-2 border">Xếp Loại Hạnh Kiểm</th>
+              <th className="p-2 border">Tác Động & Hướng Xử Lý</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y">
+            <tr><td className="p-2 border font-bold">≥ 85 điểm</td><td className="p-2 border text-emerald-700 font-bold">TỐT</td><td className="p-2 border">Tuyên dương, đề xuất khen thưởng Học sinh Tốt/Xuất sắc cuối kỳ.</td></tr>
+            <tr><td className="p-2 border font-bold">60 – 84 điểm</td><td className="p-2 border text-blue-700 font-bold">KHÁ</td><td className="p-2 border">Đạt mức nếp sống văn minh; cần duy trì và phát huy.</td></tr>
+            <tr><td className="p-2 border font-bold">40 – 59 điểm</td><td className="p-2 border text-amber-700 font-bold">ĐẠT</td><td className="p-2 border">Đạt mức tối thiểu; GVCN nhắc nhở và gửi thông báo về gia đình.</td></tr>
+            <tr><td className="p-2 border font-bold">&lt; 40 điểm</td><td className="p-2 border text-rose-700 font-bold">CHƯA ĐẠT (YẾU)</td><td className="p-2 border">Tạm hoãn xét thi đua, mời phụ huynh họp trực tiếp và thực hiện Kế hoạch rèn luyện đặc biệt.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3 className="font-bold text-indigo-800 text-xs uppercase border-l-4 border-indigo-600 pl-2">II. Bảng Cộng Điểm (Chỉ Cộng Điểm 9 & 10)</h3>
+      <p className="italic text-slate-500">* Lưu ý: Các bài kiểm tra/thi đạt điểm từ 8.0 trở xuống KHÔNG được áp dụng cộng điểm rèn luyện.</p>
+      <div className="overflow-x-auto">
+        <table className="w-full text-left border-collapse border border-slate-200">
+          <thead className="bg-emerald-50 font-bold text-emerald-900">
+            <tr><th className="p-2 border">Lĩnh Vực</th><th className="p-2 border">Hành Vi / Thành Tích Được Cộng Điểm</th><th className="p-2 border text-center">Mức Điểm Cộng</th></tr>
+          </thead>
+          <tbody className="divide-y">
+            {commendationGroups.map((group, gIdx) => (
+              group.items.map((r, idx) => (
+                <tr key={`${gIdx}-${idx}`}>
+                  {idx === 0 && <td className="p-2 border font-semibold" rowSpan={group.items.length}>{group.category}</td>}
+                  <td className="p-2 border">{r.content}</td>
+                  <td className="p-2 border text-center font-bold text-emerald-700">+{r.points} điểm / lần</td>
+                </tr>
+              ))
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <h3 className="font-bold text-indigo-800 text-xs uppercase border-l-4 border-indigo-600 pl-2">III. Bảng Trừ Điểm Hàng Tuần (Theo Sổ Cờ Đỏ / Ban Cán Sự Lớp)</h3>
+      <div className="overflow-x-auto">
+        <table className="w-full text-left border-collapse border border-slate-200">
+          <thead className="bg-rose-50 font-bold text-rose-900">
+            <tr><th className="p-2 border">Lĩnh Vực Vi Phạm</th><th className="p-2 border">Hành Vi Vi Phạm Nội Quy</th><th className="p-2 border text-center">Mức Điểm Trừ</th></tr>
+          </thead>
+          <tbody className="divide-y">
+            {violationGroups.map((group, gIdx) => (
+              group.items.map((r, idx) => (
+                <tr key={`${gIdx}-${idx}`}>
+                  {idx === 0 && <td className="p-2 border font-semibold" rowSpan={group.items.length}>{group.category}</td>}
+                  <td className="p-2 border">{r.content}</td>
+                  <td className="p-2 border text-center font-bold text-rose-700">-{r.points} điểm / lần</td>
+                </tr>
+              ))
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <h3 className="font-bold text-indigo-800 text-xs uppercase border-l-4 border-indigo-600 pl-2">IV. Công Thức Tính Điểm Tổng Kết</h3>
+      <div className="bg-slate-100 p-3 rounded-xl font-mono text-center text-indigo-900 border font-bold">
+        Điểm Tổng Kết HK = 100 − (Tổng Điểm Trừ Các Tuần) + (Tổng Điểm Cộng)
+      </div>
+    </div>
+  );
+}
+
+// Xuất nội dung Nội Quy Thi Đua ra file Word (.doc). Dùng phương pháp HTML
+// tương thích Word (không cần cài thêm thư viện docx) — Word/LibreOffice/
+// Google Docs đều mở được bình thường.
+function downloadCompetitionRulesAsWord() {
+  const commendationGroups = groupRulesByCategory(COMPETITION_RULES.filter(r => r.type === 'commendation'));
+  const violationGroups = groupRulesByCategory(COMPETITION_RULES.filter(r => r.type === 'violation'));
+
+  const rowsHtml = (groups: { category: string; items: CompetitionRule[] }[], sign: string, color: string) =>
+    groups.map(group =>
+      group.items.map((r, idx) => `
+        <tr>
+          ${idx === 0 ? `<td rowspan="${group.items.length}" style="font-weight:bold;">${group.category}</td>` : ''}
+          <td>${r.content}</td>
+          <td style="text-align:center;font-weight:bold;color:${color};">${sign}${r.points} điểm / lần</td>
+        </tr>`
+      ).join('')
+    ).join('');
+
+  const html = `
+    <html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
+    <head>
+      <meta charset="utf-8">
+      <title>Nội Quy Thi Đua</title>
+      <style>
+        body { font-family: 'Times New Roman', serif; font-size: 13pt; }
+        h1 { text-align: center; font-size: 15pt; }
+        h2 { font-size: 13pt; margin-top: 18pt; }
+        table { border-collapse: collapse; width: 100%; margin-top: 6pt; }
+        td, th { border: 1px solid #333; padding: 6px 8px; vertical-align: top; }
+        th { background: #eef; font-weight: bold; }
+        .formula { text-align: center; font-weight: bold; margin-top: 10pt; border: 1px solid #333; padding: 8px; }
+      </style>
+    </head>
+    <body>
+      <h1>BẢNG NỘI QUY VÀ QUY ĐỊNH ĐIỂM THI ĐUA RÈN LUYỆN</h1>
+      <p style="text-align:center;">Quỹ điểm ban đầu: <b>100 điểm / 1 Học kỳ</b>. Trừ điểm phát sinh theo từng tuần.</p>
+
+      <h2>I. Khung Xếp Loại Rèn Luyện Cuối Học Kỳ</h2>
+      <table>
+        <tr><th>Mức Điểm Tổng Kết</th><th>Xếp Loại Hạnh Kiểm</th><th>Tác Động & Hướng Xử Lý</th></tr>
+        <tr><td>≥ 85 điểm</td><td>TỐT</td><td>Tuyên dương, đề xuất khen thưởng Học sinh Tốt/Xuất sắc cuối kỳ.</td></tr>
+        <tr><td>60 – 84 điểm</td><td>KHÁ</td><td>Đạt mức nếp sống văn minh; cần duy trì và phát huy.</td></tr>
+        <tr><td>40 – 59 điểm</td><td>ĐẠT</td><td>Đạt mức tối thiểu; GVCN nhắc nhở và gửi thông báo về gia đình.</td></tr>
+        <tr><td>&lt; 40 điểm</td><td>CHƯA ĐẠT (YẾU)</td><td>Tạm hoãn xét thi đua, mời phụ huynh họp trực tiếp.</td></tr>
+      </table>
+
+      <h2>II. Bảng Cộng Điểm (Chỉ Cộng Điểm 9 & 10)</h2>
+      <table>
+        <tr><th>Lĩnh Vực</th><th>Hành Vi / Thành Tích Được Cộng Điểm</th><th>Mức Điểm Cộng</th></tr>
+        ${rowsHtml(commendationGroups, '+', '#0a7a3d')}
+      </table>
+
+      <h2>III. Bảng Trừ Điểm Hàng Tuần</h2>
+      <table>
+        <tr><th>Lĩnh Vực Vi Phạm</th><th>Hành Vi Vi Phạm Nội Quy</th><th>Mức Điểm Trừ</th></tr>
+        ${rowsHtml(violationGroups, '-', '#b91c1c')}
+      </table>
+
+      <h2>IV. Công Thức Tính Điểm Tổng Kết</h2>
+      <p class="formula">Điểm Tổng Kết HK = 100 − (Tổng Điểm Trừ Các Tuần) + (Tổng Điểm Cộng)</p>
+    </body>
+    </html>`;
+
+  const blob = new Blob(['\ufeff', html], { type: 'application/msword' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = 'NoiQuyThiDua.doc';
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
 
 // ==================== DANH SÁCH CHỨC VỤ BAN CÁN SỰ LỚP ====================
 // Dùng chung cho: dropdown đổi chức vụ trong bảng Danh Sách Học Sinh,
@@ -934,78 +1136,7 @@ function StudentPortal({ student, sessionToken, onRefreshStudent }: { student: S
             <h2 className="text-base font-bold text-slate-900 uppercase">BẢNG QUY ĐỊNH VÀ BẢNG ĐIỂM RÈN LUYỆN CHI TIẾT (ÁP DỤNG THPT)</h2>
             <p className="text-slate-500 text-[11px] mt-1">Quỹ điểm ban đầu: <strong>100 điểm / 1 Học kỳ</strong>. Cách quản lý: Trừ điểm phát sinh theo từng tuần.</p>
           </div>
-
-          <div className="space-y-4 text-slate-700 leading-relaxed">
-            <h3 className="font-bold text-indigo-800 text-xs uppercase border-l-4 border-indigo-600 pl-2">I. Khung Xếp Loại Rèn Luyện Cuối Học Kỳ</h3>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse border border-slate-200">
-                <thead className="bg-indigo-50 font-bold text-indigo-900">
-                  <tr>
-                    <th className="p-2 border">Mức Điểm Tổng Kết</th>
-                    <th className="p-2 border">Xếp Loại Hạnh Kiểm</th>
-                    <th className="p-2 border">Tác Động & Hướng Xử Lý</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y">
-                  <tr><td className="p-2 border font-bold">≥ 85 điểm</td><td className="p-2 border text-emerald-700 font-bold">TỐT</td><td className="p-2 border">Tuyên dương, đề xuất khen thưởng Học sinh Tốt/Xuất sắc cuối kỳ.</td></tr>
-                  <tr><td className="p-2 border font-bold">60 – 84 điểm</td><td className="p-2 border text-blue-700 font-bold">KHÁ</td><td className="p-2 border">Đạt mức nếp sống văn minh; cần duy trì và phát huy.</td></tr>
-                  <tr><td className="p-2 border font-bold">40 – 59 điểm</td><td className="p-2 border text-amber-700 font-bold">ĐẠT</td><td className="p-2 border">Đạt mức tối thiểu; GVCN nhắc nhở và gửi thông báo về gia đình.</td></tr>
-                  <tr><td className="p-2 border font-bold">&lt; 40 điểm</td><td className="p-2 border text-rose-700 font-bold">CHƯA ĐẠT (YẾU)</td><td className="p-2 border">Tạm hoãn xét thi đua, mời phụ huynh họp trực tiếp và thực hiện Kế hoạch rèn luyện đặc biệt.</td></tr>
-                </tbody>
-              </table>
-            </div>
-
-            <h3 className="font-bold text-indigo-800 text-xs uppercase border-l-4 border-indigo-600 pl-2">II. Bảng Cộng Điểm (Chỉ Cộng Điểm 9 & 10)</h3>
-            <p className="italic text-slate-500">* Lưu ý: Các bài kiểm tra/thi đạt điểm từ 8.0 trở xuống KHÔNG được áp dụng cộng điểm rèn luyện.</p>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse border border-slate-200">
-                <thead className="bg-emerald-50 font-bold text-emerald-900">
-                  <tr><th className="p-2 border">Lĩnh Vực</th><th className="p-2 border">Hành Vi / Thành Tích Được Cộng Điểm</th><th className="p-2 border text-center">Mức Điểm Cộng</th></tr>
-                </thead>
-                <tbody className="divide-y">
-                  <tr><td className="p-2 border font-semibold" rowSpan={2}>Kiểm tra / Thi</td><td className="p-2 border">Đạt điểm 10 trong bài kiểm tra (Miệng, 15 phút, Giữa kỳ, Cuối kỳ)</td><td className="p-2 border text-center font-bold text-emerald-700">+3 điểm / lần</td></tr>
-                  <tr><td className="p-2 border">Đạt điểm 9 trong bài kiểm tra (Miệng, 15 phút, Giữa kỳ, Cuối kỳ)</td><td className="p-2 border text-center font-bold text-emerald-700">+2 điểm / lần</td></tr>
-                  <tr><td className="p-2 border font-semibold" rowSpan={2}>Thi Đấu / Phong Trào</td><td className="p-2 border">Đạt giải Học sinh giỏi / KHKT / Thể thao cấp Trường (hoặc tương đương)</td><td className="p-2 border text-center font-bold text-emerald-700">+5 điểm / giải</td></tr>
-                  <tr><td className="p-2 border">Đạt giải Học sinh giỏi / KHKT cấp Tỉnh / Thành phố trở lên</td><td className="p-2 border text-center font-bold text-emerald-700">+10 điểm / giải</td></tr>
-                  <tr><td className="p-2 border font-semibold" rowSpan={2}>Đóng Góp Tập Thể</td><td className="p-2 border">Ban cán sự lớp (Lớp trưởng, Lớp phó, Cờ đỏ) hoàn thành xuất sắc nhiệm vụ</td><td className="p-2 border text-center font-bold text-emerald-700">+5 điểm / HK</td></tr>
-                  <tr><td className="p-2 border">Nhặt được của rơi trả lại người mất / Hành động dũng cảm giúp đỡ cộng đồng</td><td className="p-2 border text-center font-bold text-emerald-700">+5 điểm / lần</td></tr>
-                </tbody>
-              </table>
-            </div>
-
-            <h3 className="font-bold text-indigo-800 text-xs uppercase border-l-4 border-indigo-600 pl-2">III. Bảng Trừ Điểm Hàng Tuần (Theo Sổ Cờ Đỏ / Ban Cán Sự Lớp)</h3>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse border border-slate-200">
-                <thead className="bg-rose-50 font-bold text-rose-900">
-                  <tr><th className="p-2 border">Lĩnh Vực Vi Phạm</th><th className="p-2 border">Hành Vi Vi Phạm Nội Quy</th><th className="p-2 border text-center">Mức Điểm Trừ</th></tr>
-                </thead>
-                <tbody className="divide-y">
-                  <tr><td className="p-2 border font-semibold" rowSpan={4}>Chuyên Cần & Giờ Giấc</td><td className="p-2 border">Đi học muộn (sau tiếng trống vào lớp / giờ truy bài)</td><td className="p-2 border text-center font-bold text-rose-700">-2 điểm / lần</td></tr>
-                  <tr><td className="p-2 border">Bỏ giờ truy bài 15 phút đầu giờ</td><td className="p-2 border text-center font-bold text-rose-700">-3 điểm / lần</td></tr>
-                  <tr><td className="p-2 border">Nghỉ học không lý do (nghỉ chui)</td><td className="p-2 border text-center font-bold text-rose-700">-10 điểm / buổi</td></tr>
-                  <tr><td className="p-2 border">Trốn tiết / Trốn học giữa giờ</td><td className="p-2 border text-center font-bold text-rose-700">-15 điểm / lần</td></tr>
-                  <tr><td className="p-2 border font-semibold" rowSpan={5}>Nề Nếp Học Tập</td><td className="p-2 border">Không làm bài tập về nhà / Không chuẩn bị bài theo yêu cầu GVBM</td><td className="p-2 border text-center font-bold text-rose-700">-3 điểm / lần</td></tr>
-                  <tr><td className="p-2 border">Không mang sách vở, dụng cụ học tập theo thời khóa biểu</td><td className="p-2 border text-center font-bold text-rose-700">-2 điểm / lần</td></tr>
-                  <tr><td className="p-2 border">Mất trật tự, làm việc riêng, ngủ gật trong giờ học</td><td className="p-2 border text-center font-bold text-rose-700">-2 điểm / lần</td></tr>
-                  <tr><td className="p-2 border">Sử dụng điện thoại di động khi chưa có sự cho phép của giáo viên</td><td className="p-2 border text-center font-bold text-rose-700">-5 điểm / lần</td></tr>
-                  <tr><td className="p-2 border">Gian lận trong kiểm tra, thi cử (quay cóp, sử dụng tài liệu)</td><td className="p-2 border text-center font-bold text-rose-700">-20 điểm / lần</td></tr>
-                  <tr><td className="p-2 border font-semibold" rowSpan={4}>Trang Phục & Rèn Luyện</td><td className="p-2 border">Sai đồng phục, không đeo thẻ học sinh, đi dép lê không quai</td><td className="p-2 border text-center font-bold text-rose-700">-2 điểm / lỗi / buổi</td></tr>
-                  <tr><td className="p-2 border">Nhuộm tóc màu sáng, nhuộm Highlight, nam để tóc quá dài</td><td className="p-2 border text-center font-bold text-rose-700">-5 điểm / lần</td></tr>
-                  <tr><td className="p-2 border">Trang điểm đậm, sơn móng tay/móng chân màu nổi bật</td><td className="p-2 border text-center font-bold text-rose-700">-3 điểm / lần</td></tr>
-                  <tr><td className="p-2 border">Hút thuốc lá, thuốc lá điện tử trong trường (hoặc vi phạm ATGT)</td><td className="p-2 border text-center font-bold text-rose-700">-20 điểm / lần</td></tr>
-                  <tr><td className="p-2 border font-semibold" rowSpan={4}>Môi Trường & Văn Hóa</td><td className="p-2 border">Bỏ trực nhật / Trực nhật sơ sài, không đổ rác đúng quy định</td><td className="p-2 border text-center font-bold text-rose-700">-5 điểm / lần</td></tr>
-                  <tr><td className="p-2 border">Xả rác bừa bãi trong lớp hoặc khuôn viên trường</td><td className="p-2 border text-center font-bold text-rose-700">-3 điểm / lần</td></tr>
-                  <tr><td className="p-2 border">Nói tục, chửi thề, gây mất đoàn kết nội bộ lớp</td><td className="p-2 border text-center font-bold text-rose-700">-5 điểm / lần</td></tr>
-                  <tr><td className="p-2 border">Mang đồ ăn, nước ngọt vào sử dụng trong giờ học</td><td className="p-2 border text-center font-bold text-rose-700">-2 điểm / lần</td></tr>
-                </tbody>
-              </table>
-            </div>
-
-            <h3 className="font-bold text-indigo-800 text-xs uppercase border-l-4 border-indigo-600 pl-2">IV. Công Thức Tính Điểm Tổng Kết</h3>
-            <div className="bg-slate-100 p-3 rounded-xl font-mono text-center text-indigo-900 border font-bold">
-              Điểm Tổng Kết HK = 100 − (Tổng Điểm Trừ Các Tuần) + (Tổng Điểm Cộng)
-            </div>
-          </div>
+          <CompetitionRulesContent />
         </div>
       )}
 
@@ -2022,8 +2153,279 @@ function TreasurerPortal({ student, sessionToken, onSwitchToStudentView }: { stu
 }
 
 // ==================== 5. BẢNG ĐIỀU KHIỂN GIÁO VIÊN CHỦ NHIỆM ====================
+// ==================== TAB ĐIỂM MIỆNG (BẤT KỲ LỚP DẠY NÀO) ====================
+function OralGradesTab({ teacher }: { teacher: Teacher }) {
+  const [classes, setClasses] = useState<OralGradeClass[]>([]);
+  const [selectedClassId, setSelectedClassId] = useState('');
+  const [newClassName, setNewClassName] = useState('');
+  const [students, setStudents] = useState<OralGradeStudent[]>([]);
+  const [records, setRecords] = useState<OralGradeRecord[]>([]);
+  const [importing, setImporting] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const [entryStudentId, setEntryStudentId] = useState('');
+  const [entryDate, setEntryDate] = useState(new Date().toISOString().slice(0, 10));
+  const [entryScore, setEntryScore] = useState('');
+
+  useEffect(() => { fetchClasses(); }, [teacher.id]);
+  useEffect(() => {
+    if (selectedClassId) fetchClassData();
+    else { setStudents([]); setRecords([]); }
+  }, [selectedClassId]);
+
+  const fetchClasses = async () => {
+    const { data, error } = await supabase.from('oral_grade_classes').select('*').eq('teacher_id', teacher.id).order('class_name', { ascending: true });
+    if (error) { console.error('Lỗi tải danh sách lớp điểm miệng:', error.message); return; }
+    if (data) {
+      setClasses(data as OralGradeClass[]);
+      if (!selectedClassId && data.length > 0) setSelectedClassId(data[0].id);
+    }
+  };
+
+  const fetchClassData = async () => {
+    const [stRes, recRes] = await Promise.all([
+      supabase.from('oral_grade_students').select('*').eq('class_id', selectedClassId).order('full_name', { ascending: true }),
+      supabase.from('oral_grade_records').select('*').eq('class_id', selectedClassId).order('grade_date', { ascending: false }),
+    ]);
+    if (stRes.data) setStudents(stRes.data as OralGradeStudent[]);
+    if (recRes.data) setRecords(recRes.data as OralGradeRecord[]);
+  };
+
+  const handleCreateClass = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newClassName.trim()) return;
+    const { data, error } = await supabase.from('oral_grade_classes')
+      .insert([{ teacher_id: teacher.id, class_name: newClassName.trim() }])
+      .select()
+      .single();
+    if (error) { alert('Lỗi tạo lớp: ' + error.message); return; }
+    setNewClassName('');
+    await fetchClasses();
+    if (data) setSelectedClassId((data as OralGradeClass).id);
+  };
+
+  const handleDeleteClass = async (id: string) => {
+    if (!confirm('Xóa lớp này? Toàn bộ danh sách học sinh và điểm miệng của lớp sẽ bị xóa theo.')) return;
+    const { error } = await supabase.from('oral_grade_classes').delete().eq('id', id);
+    if (error) { alert('Lỗi xóa lớp: ' + error.message); return; }
+    if (selectedClassId === id) setSelectedClassId('');
+    fetchClasses();
+  };
+
+  const handleImportExcel = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !selectedClassId) return;
+    setImporting(true);
+    try {
+      const buf = await file.arrayBuffer();
+      const workbook = XLSX.read(buf, { cellDates: true });
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      const rows: any[] = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+
+      const names = rows
+        .map(r => String(r['Họ và tên'] || r['Họ tên'] || r['Ho va ten'] || '').trim())
+        .filter(Boolean);
+
+      if (names.length === 0) {
+        alert('Không đọc được cột "Họ và tên" trong file. Kiểm tra lại tên cột trong file Excel.');
+        setImporting(false);
+        if (fileInputRef.current) fileInputRef.current.value = '';
+        return;
+      }
+
+      const payload = names.map(full_name => ({ class_id: selectedClassId, full_name }));
+      const { error } = await supabase.from('oral_grade_students').insert(payload);
+      if (error) {
+        alert('Lỗi nhập danh sách: ' + error.message);
+      } else {
+        alert(`Đã nhập ${names.length} học sinh vào lớp!`);
+        fetchClassData();
+      }
+    } catch (err: any) {
+      alert('Lỗi đọc file Excel: ' + err.message);
+    } finally {
+      setImporting(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const handleDeleteStudent = async (id: string) => {
+    if (!confirm('Xóa học sinh này khỏi danh sách? Điểm miệng đã nhập của học sinh này cũng sẽ bị xóa.')) return;
+    await supabase.from('oral_grade_students').delete().eq('id', id);
+    fetchClassData();
+  };
+
+  const handleAddRecord = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!entryStudentId || !entryDate || entryScore === '') {
+      alert('Vui lòng chọn học sinh, nhập ngày tháng và điểm.');
+      return;
+    }
+    const scoreNum = Number(entryScore);
+    if (isNaN(scoreNum) || scoreNum < 0 || scoreNum > 10) {
+      alert('Điểm phải là số từ 0 đến 10.');
+      return;
+    }
+    const { error } = await supabase.from('oral_grade_records').insert([
+      { class_id: selectedClassId, student_id: entryStudentId, grade_date: entryDate, score: scoreNum }
+    ]);
+    if (error) { alert('Lỗi lưu điểm: ' + error.message); return; }
+    setEntryScore('');
+    fetchClassData();
+  };
+
+  const handleDeleteRecord = async (id: string) => {
+    if (!confirm('Xóa điểm miệng này?')) return;
+    await supabase.from('oral_grade_records').delete().eq('id', id);
+    fetchClassData();
+  };
+
+  const handleExportRecords = () => {
+    const cls = classes.find(c => c.id === selectedClassId);
+    const data = records.map(r => {
+      const st = students.find(s => s.id === r.student_id);
+      return { 'Ngày': r.grade_date, 'Họ và tên': st?.full_name || '(đã xóa)', 'Điểm': r.score };
+    });
+    const ws = XLSX.utils.json_to_sheet(data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'DiemMieng');
+    XLSX.writeFile(wb, `DiemMieng_${cls?.class_name || 'Lop'}.xlsx`);
+  };
+
+  const selectedClass = classes.find(c => c.id === selectedClassId);
+
+  return (
+    <div className="space-y-6 text-xs font-sans">
+      <div className="bg-white p-5 rounded-2xl border shadow-sm space-y-3">
+        <div>
+          <h2 className="font-bold text-slate-800 text-sm">Quản Lý Các Lớp Dạy (Điểm Miệng)</h2>
+          <p className="text-slate-500 text-[11px] mt-1">Dùng cho bất kỳ lớp nào thầy/cô đang dạy (không nhất thiết là lớp chủ nhiệm) — mỗi lớp có danh sách học sinh riêng, nhập từ Excel.</p>
+        </div>
+        <form onSubmit={handleCreateClass} className="flex gap-2 flex-wrap">
+          <input type="text" placeholder="Nhập tên lớp (VD: 10A2, 11B1...)" value={newClassName} onChange={e => setNewClassName(e.target.value)} className="p-2 border rounded-xl flex-1 min-w-[200px]" required />
+          <button type="submit" className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-4 py-2 rounded-xl shadow">+ Tạo Lớp</button>
+        </form>
+
+        {classes.length > 0 ? (
+          <div className="flex gap-2 flex-wrap pt-2">
+            {classes.map(c => (
+              <div key={c.id} className={`flex items-center gap-1.5 pl-3 pr-2 py-1.5 rounded-xl font-bold ${selectedClassId === c.id ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-700'}`}>
+                <button type="button" onClick={() => setSelectedClassId(c.id)}>{c.class_name}</button>
+                <button type="button" onClick={() => handleDeleteClass(c.id)} className={`${selectedClassId === c.id ? 'text-white/70 hover:text-white' : 'text-rose-500 hover:text-rose-700'}`}>
+                  <Trash2 className="w-3.5 h-3.5 inline" />
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-slate-400 italic">Chưa có lớp nào — tạo lớp mới ở trên để bắt đầu.</p>
+        )}
+      </div>
+
+      {selectedClassId && (
+        <>
+          <div className="bg-white p-5 rounded-2xl border shadow-sm flex justify-between items-center flex-wrap gap-3">
+            <div>
+              <h2 className="font-bold text-slate-800 text-sm">Danh Sách Học Sinh — Lớp {selectedClass?.class_name}</h2>
+              <p className="text-slate-500 text-[11px] mt-1">File Excel cần có cột "Họ và tên".</p>
+            </div>
+            <div className="flex gap-2">
+              <input ref={fileInputRef} type="file" accept=".xlsx,.xls" onChange={handleImportExcel} className="hidden" id="oral-excel-import" />
+              <label htmlFor="oral-excel-import" className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl font-bold cursor-pointer shadow">
+                {importing ? 'Đang nhập...' : '📤 Đẩy Danh Sách Từ Excel'}
+              </label>
+            </div>
+          </div>
+
+          <div className="bg-white p-5 rounded-2xl border shadow-sm space-y-3">
+            <h2 className="font-bold text-slate-800 text-sm">Nhập Điểm Miệng</h2>
+            {students.length === 0 ? (
+              <p className="text-slate-400 italic">Lớp chưa có học sinh — đẩy danh sách từ Excel ở trên trước.</p>
+            ) : (
+              <form onSubmit={handleAddRecord} className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                <select value={entryStudentId} onChange={e => setEntryStudentId(e.target.value)} className="p-2 border rounded-xl md:col-span-2" required>
+                  <option value="">-- Chọn học sinh --</option>
+                  {students.map(s => <option key={s.id} value={s.id}>{s.full_name}</option>)}
+                </select>
+                <input type="date" value={entryDate} onChange={e => setEntryDate(e.target.value)} className="p-2 border rounded-xl" required />
+                <input type="number" min="0" max="10" step="0.1" placeholder="Điểm (0-10)" value={entryScore} onChange={e => setEntryScore(e.target.value)} className="p-2 border rounded-xl" required />
+                <button type="submit" className="md:col-span-4 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl py-2.5 shadow">Lưu Điểm</button>
+              </form>
+            )}
+          </div>
+
+          <div className="bg-white p-5 rounded-2xl border shadow-sm space-y-3">
+            <div className="flex justify-between items-center flex-wrap gap-3">
+              <h2 className="font-bold text-slate-800 text-sm">Bảng Điểm Miệng Đã Nhập</h2>
+              <button onClick={handleExportRecords} className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-2 rounded-xl font-bold">📥 Xuất Excel</button>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead className="bg-slate-50 font-bold border-b text-slate-700">
+                  <tr>
+                    <th className="p-2 border-r">Ngày Tháng</th>
+                    <th className="p-2 border-r">Họ và Tên</th>
+                    <th className="p-2 border-r text-center">Điểm</th>
+                    <th className="p-2 text-center">Thao Tác</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {records.map(r => {
+                    const st = students.find(s => s.id === r.student_id);
+                    return (
+                      <tr key={r.id} className="hover:bg-slate-50">
+                        <td className="p-2 border-r font-mono">{r.grade_date}</td>
+                        <td className="p-2 border-r font-semibold">{st?.full_name || '(đã xóa)'}</td>
+                        <td className="p-2 border-r text-center font-bold text-indigo-700">{r.score}</td>
+                        <td className="p-2 text-center">
+                          <button onClick={() => handleDeleteRecord(r.id)} className="p-1.5 text-rose-600 hover:bg-rose-50 rounded">
+                            <Trash2 className="w-4 h-4 inline" />
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              {records.length === 0 && <p className="text-slate-400 italic p-3">Chưa có điểm miệng nào được nhập.</p>}
+            </div>
+          </div>
+
+          <div className="bg-white rounded-2xl border shadow-sm overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead className="bg-slate-50 font-bold border-b text-slate-700">
+                <tr>
+                  <th className="p-3 border-r">Họ và Tên</th>
+                  <th className="p-3 border-r text-center">Số Lần Đã Nhập Điểm</th>
+                  <th className="p-3 text-center">Thao Tác</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {students.map(s => (
+                  <tr key={s.id} className="hover:bg-slate-50">
+                    <td className="p-3 border-r font-semibold">{s.full_name}</td>
+                    <td className="p-3 border-r text-center">{records.filter(r => r.student_id === s.id).length}</td>
+                    <td className="p-3 text-center">
+                      <button onClick={() => handleDeleteStudent(s.id)} className="p-1.5 text-rose-600 hover:bg-rose-50 rounded">
+                        <Trash2 className="w-4 h-4 inline" />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+                {students.length === 0 && (
+                  <tr><td colSpan={3} className="p-3 text-slate-400 italic">Chưa có học sinh nào.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function TeacherDashboard({ teacher }: { teacher: Teacher }) {
-  const [activeTab, setActiveTab] = useState<'students' | 'fees' | 'announcements' | 'reports' | 'groups'>('students');
+  const [activeTab, setActiveTab] = useState<'students' | 'fees' | 'announcements' | 'reports' | 'groups' | 'rules' | 'oral_grades'>('students');
   const [students, setStudents] = useState<Student[]>([]);
   const [feeItems, setFeeItems] = useState<FeeItem[]>([]);
   const [feePayments, setFeePayments] = useState<FeePayment[]>([]);
@@ -2510,6 +2912,8 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
           <button onClick={() => setActiveTab('groups')} className={`px-4 py-2 rounded-xl font-bold transition ${activeTab === 'groups' ? 'bg-indigo-600 text-white shadow' : 'bg-slate-100'}`}>🗂️ Phân Chia Tổ & Ban Cán Sự</button>
           <button onClick={() => setActiveTab('fees')} className={`px-4 py-2 rounded-xl font-bold transition ${activeTab === 'fees' ? 'bg-indigo-600 text-white shadow' : 'bg-slate-100'}`}>💰 Quản Lý Khoản Thu & Quỹ Lớp</button>
           <button onClick={() => setActiveTab('reports')} className={`px-4 py-2 rounded-xl font-bold transition ${activeTab === 'reports' ? 'bg-indigo-600 text-white shadow' : 'bg-slate-100'}`}>📊 Thi Đua & Báo Cáo</button>
+          <button onClick={() => setActiveTab('rules')} className={`px-4 py-2 rounded-xl font-bold transition ${activeTab === 'rules' ? 'bg-indigo-600 text-white shadow' : 'bg-slate-100'}`}>📖 Nội Quy Thi Đua</button>
+          <button onClick={() => setActiveTab('oral_grades')} className={`px-4 py-2 rounded-xl font-bold transition ${activeTab === 'oral_grades' ? 'bg-indigo-600 text-white shadow' : 'bg-slate-100'}`}>📝 Điểm Miệng</button>
           <button onClick={() => setActiveTab('announcements')} className={`px-4 py-2 rounded-xl font-bold transition ${activeTab === 'announcements' ? 'bg-indigo-600 text-white shadow' : 'bg-slate-100'}`}>📢 Thông Báo & Dặn Dò</button>
         </div>
       </div>
@@ -2980,6 +3384,28 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
             )}
           </div>
         </div>
+      )}
+
+      {activeTab === 'rules' && (
+        <div className="bg-white p-6 rounded-2xl border shadow-sm space-y-5">
+          <div className="flex justify-between items-start flex-wrap gap-3 border-b pb-3">
+            <div>
+              <h2 className="text-base font-bold text-slate-900 uppercase">Bảng Quy Định & Bảng Điểm Rèn Luyện Chi Tiết</h2>
+              <p className="text-slate-500 text-[11px] mt-1">Nội dung này hiển thị đồng bộ với trang học sinh và dropdown chọn nội dung của Lớp trưởng — sửa 1 nơi (trong mã nguồn) là cập nhật khắp nơi.</p>
+            </div>
+            <button
+              onClick={downloadCompetitionRulesAsWord}
+              className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl font-bold shadow flex items-center gap-1.5 shrink-0"
+            >
+              📄 Tải Về File Word
+            </button>
+          </div>
+          <CompetitionRulesContent />
+        </div>
+      )}
+
+      {activeTab === 'oral_grades' && (
+        <OralGradesTab teacher={teacher} />
       )}
 
       {activeTab === 'announcements' && (

@@ -538,6 +538,15 @@ function LoginScreen({ onTeacherLogin, onStudentLogin, onAdminLogin, onForgotPas
   const [studentCode, setStudentCode] = useState('');
   const [studentPassword, setStudentPassword] = useState('');
 
+  // "Quên mật khẩu" của học sinh: KHÔNG tự động reset (vì không có email
+  // để xác thực thật sự) — thay vào đó gửi 1 yêu cầu tới GVCN, GVCN xem
+  // và cấp lại mật khẩu mới thủ công (giống cách cấp mật khẩu ban đầu).
+  const [showStudentForgot, setShowStudentForgot] = useState(false);
+  const [forgotFullName, setForgotFullName] = useState('');
+  const [forgotNote, setForgotNote] = useState('');
+  const [forgotSending, setForgotSending] = useState(false);
+  const [forgotSent, setForgotSent] = useState(false);
+
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -655,6 +664,27 @@ function LoginScreen({ onTeacherLogin, onStudentLogin, onAdminLogin, onForgotPas
     onStudentLogin(row as Student, row.session_token);
   };
 
+  const handleSubmitForgotPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!matchedTeacher || !studentCode.trim() || !forgotFullName.trim()) {
+      alert('Vui lòng nhập đầy đủ MSHS (ở trên) và Họ và tên.');
+      return;
+    }
+    setForgotSending(true);
+    const { error } = await supabase.from('password_reset_requests').insert([{
+      teacher_id: matchedTeacher.id,
+      student_code: studentCode.trim().toUpperCase(),
+      full_name: forgotFullName.trim(),
+      note: forgotNote.trim() || null,
+    }]);
+    setForgotSending(false);
+    if (error) {
+      alert('Lỗi gửi yêu cầu: ' + error.message);
+      return;
+    }
+    setForgotSent(true);
+  };
+
   return (
     <div className="min-h-screen flex items-center justify-center p-4">
       <div className="bg-white max-w-md w-full rounded-2xl shadow-xl p-8 space-y-5">
@@ -733,11 +763,42 @@ function LoginScreen({ onTeacherLogin, onStudentLogin, onAdminLogin, onForgotPas
                 value={studentPassword} onChange={e => setStudentPassword(e.target.value)}
                 className="w-full p-3 border rounded-xl text-sm"
               />
-              <p className="text-[11px] text-slate-400 mt-1 italic">* Nếu chưa có mật khẩu hoặc quên mật khẩu, vui lòng liên hệ Giáo viên chủ nhiệm để được cấp lại.</p>
+              <p className="text-[11px] text-slate-400 mt-1 italic">* Nếu chưa có mật khẩu hoặc quên mật khẩu, vui lòng liên hệ Giáo viên chủ nhiệm để được cấp lại, hoặc gửi yêu cầu bên dưới.</p>
             </div>
             <button type="submit" disabled={loading} className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-sm shadow transition">
               {loading ? 'Đang xác thực...' : 'Đăng Nhập'}
             </button>
+
+            <button
+              type="button"
+              onClick={() => { setShowStudentForgot(!showStudentForgot); setForgotSent(false); }}
+              className="w-full text-center text-indigo-600 hover:underline font-medium"
+            >
+              {showStudentForgot ? 'Đóng' : 'Quên mật khẩu?'}
+            </button>
+
+            {showStudentForgot && (
+              forgotSent ? (
+                <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl font-medium text-center">
+                  ✓ Đã gửi yêu cầu tới Giáo viên chủ nhiệm! Vui lòng chờ được cấp lại mật khẩu mới.
+                </div>
+              ) : (
+                <div className="p-3 bg-slate-50 border rounded-xl space-y-2.5">
+                  <p className="text-[11px] text-slate-500 italic">Nhập MSHS ở ô "Bước 2" phía trên trước, sau đó điền thông tin dưới đây để gửi yêu cầu cấp lại mật khẩu tới GVCN.</p>
+                  <div>
+                    <label className="font-semibold block mb-1">Họ và tên của em (*):</label>
+                    <input type="text" placeholder="Để GVCN xác nhận đúng người" value={forgotFullName} onChange={e => setForgotFullName(e.target.value)} className="w-full p-2.5 border rounded-xl" />
+                  </div>
+                  <div>
+                    <label className="font-semibold block mb-1">Ghi chú (không bắt buộc):</label>
+                    <input type="text" placeholder="VD: Em quên mật khẩu đã đổi trước đó" value={forgotNote} onChange={e => setForgotNote(e.target.value)} className="w-full p-2.5 border rounded-xl" />
+                  </div>
+                  <button type="button" onClick={handleSubmitForgotPassword} disabled={forgotSending} className="w-full py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl font-bold shadow transition">
+                    {forgotSending ? 'Đang gửi...' : 'Gửi Yêu Cầu Cấp Lại Mật Khẩu'}
+                  </button>
+                </div>
+              )
+            )}
           </form>
         )}
       </div>
@@ -1519,24 +1580,66 @@ function ClassLeaderPortal({ student, sessionToken, onSwitchToStudentView }: { s
   const [groupScores, setGroupScores] = useState({ group1: '100', group2: '100', group3: '100', group4: '100' });
   const [leaderNote, setLeaderNote] = useState('');
   const [scoreHistory, setScoreHistory] = useState<GroupWeeklyScore[]>([]);
+  const [classRecords, setClassRecords] = useState<StudentRecord[]>([]);
+  // Khi khác null: đang SỬA bản ghi này (thay vì thêm mới) — form phía trên
+  // dùng chung, chỉ đổi hành vi submit và nhãn nút.
+  const [editingRecordId, setEditingRecordId] = useState<string | null>(null);
 
   useEffect(() => {
     fetchClassData();
   }, [student.id, sessionToken]);
 
-  // Đọc qua RPC get_class_students / get_class_group_weekly_scores thay vì
-  // đọc trực tiếp bảng — đảm bảo Lớp trưởng chỉ thấy đúng dữ liệu lớp mình.
+  // Đọc qua RPC get_class_students / get_class_group_weekly_scores /
+  // leader_get_class_records thay vì đọc trực tiếp bảng — đảm bảo Lớp
+  // trưởng chỉ thấy đúng dữ liệu lớp mình.
   const fetchClassData = async () => {
-    const [stRes, gsRes] = await Promise.all([
+    const [stRes, gsRes, recRes] = await Promise.all([
       supabase.rpc('get_class_students', { p_session_token: sessionToken }).order('code', { ascending: true }),
       supabase.rpc('get_class_group_weekly_scores', { p_session_token: sessionToken }).order('week_number', { ascending: true }),
+      supabase.rpc('leader_get_class_records', { p_session_token: sessionToken }).order('week_number', { ascending: false }),
     ]);
 
     if (stRes.error) console.error('Lỗi tải danh sách lớp:', stRes.error.message);
     if (gsRes.error) console.error('Lỗi tải điểm thi đua Tổ:', gsRes.error.message);
+    if (recRes.error) console.error('Lỗi tải nhật ký vi phạm/khen thưởng:', recRes.error.message);
 
     if (stRes.data) setClassStudents(stRes.data as Student[]);
     if (gsRes.data) setScoreHistory(gsRes.data as GroupWeeklyScore[]);
+    if (recRes.data) setClassRecords(recRes.data as StudentRecord[]);
+  };
+
+  // Đưa dữ liệu 1 bản ghi có sẵn lên form phía trên để sửa.
+  const handleStartEditRecord = (r: StudentRecord) => {
+    setEditingRecordId(r.id);
+    setSelectedStudentId(r.student_id);
+    setWeekNumber(r.week_number);
+    setRecordDate(r.record_date || new Date().toISOString().slice(0, 10));
+    setRecordType(r.type);
+    const matchedRule = COMPETITION_RULES.find(rule => rule.type === r.type && rule.content === r.content);
+    if (matchedRule) {
+      setUseCustomContent(false);
+      setContent(r.content);
+    } else {
+      setUseCustomContent(true);
+      setContent(r.content);
+    }
+    setPointsStr(String(r.points));
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleCancelEditRecord = () => {
+    setEditingRecordId(null);
+    setContent('');
+    setPointsStr('1');
+    setUseCustomContent(false);
+  };
+
+  const handleDeleteRecord = async (id: string) => {
+    if (!confirm('Xóa bản ghi này?')) return;
+    const { error } = await supabase.rpc('leader_delete_record', { p_session_token: sessionToken, p_record_id: id });
+    if (error) { alert('Lỗi xóa: ' + error.message); return; }
+    if (editingRecordId === id) handleCancelEditRecord();
+    fetchClassData();
   };
 
   // Xử lý khi lớp trưởng chọn 1 nội dung trong dropdown quy định điểm
@@ -1561,6 +1664,27 @@ function ClassLeaderPortal({ student, sessionToken, onSwitchToStudentView }: { s
     }
     const parsedPoints = parseInt(pointsStr, 10) || 1;
 
+    if (editingRecordId) {
+      // Đang SỬA 1 bản ghi có sẵn.
+      const { error } = await supabase.rpc('leader_update_record', {
+        p_session_token: sessionToken,
+        p_record_id: editingRecordId,
+        p_week_number: weekNumber,
+        p_record_date: recordDate,
+        p_type: recordType,
+        p_content: content.trim(),
+        p_points: parsedPoints,
+      });
+      if (!error) {
+        alert('Đã cập nhật bản ghi thành công!');
+        handleCancelEditRecord();
+        fetchClassData();
+      } else {
+        alert('Lỗi khi cập nhật: ' + error.message);
+      }
+      return;
+    }
+
     // Gọi hàm _secure (dùng session token) thay vì hàm gốc leader_add_record
     // (hàm gốc vẫn tồn tại nhưng chỉ hàm _secure mới được phép gọi trực tiếp
     // từ client sau khi khóa lại ở Phần F của migration_5_session_token.sql).
@@ -1579,6 +1703,7 @@ function ClassLeaderPortal({ student, sessionToken, onSwitchToStudentView }: { s
       setContent('');
       setPointsStr('1');
       setUseCustomContent(false);
+      fetchClassData();
     } else {
       alert('Lỗi khi lưu điểm: ' + error.message);
     }
@@ -1734,10 +1859,48 @@ function ClassLeaderPortal({ student, sessionToken, onSwitchToStudentView }: { s
               )}
             </div>
 
-            <button type="submit" className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow transition">
-              Lưu Điểm Cho Học Sinh
-            </button>
+            <div className="flex gap-2">
+              <button type="submit" className={`flex-1 py-2.5 text-white font-bold rounded-xl shadow transition ${editingRecordId ? 'bg-amber-600 hover:bg-amber-700' : 'bg-indigo-600 hover:bg-indigo-700'}`}>
+                {editingRecordId ? 'Cập Nhật Bản Ghi' : 'Lưu Điểm Cho Học Sinh'}
+              </button>
+              {editingRecordId && (
+                <button type="button" onClick={handleCancelEditRecord} className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition">
+                  Hủy Sửa
+                </button>
+              )}
+            </div>
           </form>
+
+          <div className="pt-3 border-t">
+            <h3 className="font-bold text-slate-700 mb-2">Nhật Ký Đã Nhập (Sửa / Xóa)</h3>
+            {classRecords.length === 0 ? (
+              <p className="text-slate-400 italic">Chưa có bản ghi nào.</p>
+            ) : (
+              <div className="max-h-72 overflow-y-auto space-y-1.5">
+                {classRecords.map(r => {
+                  const st = classStudents.find(s => s.id === r.student_id);
+                  return (
+                    <div key={r.id} className={`flex items-center justify-between gap-2 p-2 rounded-xl border ${r.type === 'violation' ? 'bg-rose-50/60 border-rose-200' : 'bg-emerald-50/60 border-emerald-200'}`}>
+                      <div className="flex-1 min-w-0">
+                        <span className="font-bold">{st?.full_name || '(HS đã xóa)'}</span>
+                        <span className="text-slate-500"> • Tuần {r.week_number} {r.record_date ? `• ${r.record_date}` : ''} • </span>
+                        <span className={r.type === 'violation' ? 'text-rose-600 font-bold' : 'text-emerald-600 font-bold'}>
+                          {r.type === 'violation' ? `-${r.points}` : `+${r.points}`}đ
+                        </span>
+                        <p className="text-slate-600 truncate">{r.content}</p>
+                      </div>
+                      <div className="flex gap-1 shrink-0">
+                        <button type="button" onClick={() => handleStartEditRecord(r)} className="bg-indigo-50 text-indigo-700 border border-indigo-200 px-2 py-1 rounded-lg font-bold hover:bg-indigo-100">Sửa</button>
+                        <button type="button" onClick={() => handleDeleteRecord(r.id)} className="p-1.5 text-rose-600 hover:bg-rose-50 rounded">
+                          <Trash2 className="w-4 h-4 inline" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
 
         <div className="bg-white p-5 rounded-2xl border shadow-sm space-y-4">
@@ -2428,6 +2591,14 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
   const [activeTab, setActiveTab] = useState<'students' | 'fees' | 'announcements' | 'reports' | 'groups' | 'rules' | 'oral_grades'>('students');
   const [students, setStudents] = useState<Student[]>([]);
   const [feeItems, setFeeItems] = useState<FeeItem[]>([]);
+  const [resetRequests, setResetRequests] = useState<{ id: string; student_code: string; full_name: string; note?: string; created_at: string }[]>([]);
+  // Modal CẤP MẬT KHẨU RIÊNG — gọn, chỉ 1 ô mật khẩu, dùng chung cho cả
+  // trường hợp bấm từ banner "Yêu Cầu Cấp Lại Mật Khẩu" lẫn bấm trực tiếp
+  // từ danh sách học sinh (thay vì phải mở cả form Sửa Học Sinh đầy đủ).
+  const [resetPasswordTarget, setResetPasswordTarget] = useState<Student | null>(null);
+  const [resetPasswordValue, setResetPasswordValue] = useState('');
+  const [resetPasswordSaving, setResetPasswordSaving] = useState(false);
+  const [resolvingRequestId, setResolvingRequestId] = useState<string | null>(null);
   const [feePayments, setFeePayments] = useState<FeePayment[]>([]);
   const [feeExpenses, setFeeExpenses] = useState<FeeExpense[]>([]);
   const [groupWeeklyScores, setGroupWeeklyScores] = useState<GroupWeeklyScore[]>([]);
@@ -2435,7 +2606,7 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
   const [studentRecords, setStudentRecords] = useState<StudentRecord[]>([]);
   const [selectedStudentForModal, setSelectedStudentForModal] = useState<Student | null>(null);
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
-  const [editForm, setEditForm] = useState({ code: '', full_name: '', dob: '', class_role: 'Học sinh', group_number: 1, password: '' });
+  const [editForm, setEditForm] = useState({ code: '', full_name: '', dob: '', class_role: 'Học sinh', group_number: 1 });
   const [selectedWeek, setSelectedWeek] = useState<string>('all');
   const [selectedFeeForUnpaid, setSelectedFeeForUnpaid] = useState<string>('');
   const [importing, setImporting] = useState(false);
@@ -2466,14 +2637,16 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
   }, [teacher.id]);
 
   const fetchData = async () => {
-    const [stRes, fRes, aRes, rRes, gsRes, expRes] = await Promise.all([
+    const [stRes, fRes, aRes, rRes, gsRes, expRes, prRes] = await Promise.all([
       supabase.from('students').select('*').eq('teacher_id', teacher.id).order('code', { ascending: true }),
       supabase.from('fee_items').select('*').eq('teacher_id', teacher.id),
       supabase.from('announcements').select('*').eq('teacher_id', teacher.id).order('created_date', { ascending: false }),
       supabase.from('student_records').select('*').eq('teacher_id', teacher.id).order('week_number', { ascending: false }),
       supabase.from('group_weekly_scores').select('*').eq('teacher_id', teacher.id).order('week_number', { ascending: true }),
       supabase.from('fee_expenses').select('*').eq('teacher_id', teacher.id).order('expense_date', { ascending: false }),
+      supabase.from('password_reset_requests').select('*').eq('teacher_id', teacher.id).eq('is_resolved', false).order('created_at', { ascending: false }),
     ]);
+    if (prRes.data) setResetRequests(prRes.data as any);
 
     if (stRes.data) setStudents(stRes.data as Student[]);
     if (fRes.data) {
@@ -2598,8 +2771,65 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
       dob: s.dob || '',
       class_role: s.class_role || 'Học sinh',
       group_number: s.group_number || 1,
-      password: '', // Để trống = không đổi mật khẩu hiện tại, chỉ nhập khi muốn cấp lại mật khẩu mới
     });
+  };
+
+  // Mở form CẤP MẬT KHẨU RIÊNG (gọn, chỉ 1 ô) cho đúng học sinh theo MSHS
+  // trong yêu cầu quên mật khẩu — không cần mở cả form Sửa Học Sinh đầy đủ.
+  const handleResolveFromRequest = (r: { id: string; student_code: string }) => {
+    const target = students.find(s => s.code.toUpperCase() === r.student_code.toUpperCase());
+    if (!target) {
+      alert(`Không tìm thấy học sinh có MSHS "${r.student_code}" trong danh sách lớp. Vui lòng kiểm tra lại.`);
+      return;
+    }
+    setResetPasswordTarget(target);
+    setResetPasswordValue('');
+    setResolvingRequestId(r.id);
+  };
+
+  // Bấm trực tiếp từ danh sách học sinh (không thông qua yêu cầu nào).
+  const handleOpenResetPassword = (s: Student) => {
+    setResetPasswordTarget(s);
+    setResetPasswordValue('');
+    setResolvingRequestId(null);
+  };
+
+  const handleCloseResetPassword = () => {
+    setResetPasswordTarget(null);
+    setResetPasswordValue('');
+    setResolvingRequestId(null);
+  };
+
+  const handleSaveResetPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!resetPasswordTarget || !resetPasswordValue.trim()) {
+      alert('Vui lòng nhập mật khẩu mới.');
+      return;
+    }
+    setResetPasswordSaving(true);
+    const { error } = await supabase.from('students').update({ password: resetPasswordValue.trim() }).eq('id', resetPasswordTarget.id);
+
+    if (error) {
+      setResetPasswordSaving(false);
+      alert('Lỗi cấp mật khẩu: ' + error.message);
+      return;
+    }
+
+    // Nếu cấp từ 1 yêu cầu quên mật khẩu cụ thể, đánh dấu yêu cầu đó đã xử lý.
+    if (resolvingRequestId) {
+      await supabase.from('password_reset_requests').update({ is_resolved: true }).eq('id', resolvingRequestId);
+      setResetRequests(prev => prev.filter(req => req.id !== resolvingRequestId));
+    }
+
+    setResetPasswordSaving(false);
+    alert(`Đã cấp mật khẩu mới cho học sinh ${resetPasswordTarget.full_name}!`);
+    handleCloseResetPassword();
+  };
+
+  const handleDismissResetRequest = async (id: string) => {
+    const { error } = await supabase.from('password_reset_requests').update({ is_resolved: true }).eq('id', id);
+    if (error) { alert('Lỗi: ' + error.message); return; }
+    setResetRequests(prev => prev.filter(r => r.id !== id));
   };
 
   const handleCloseEditStudent = () => {
@@ -2610,6 +2840,8 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
     e.preventDefault();
     if (!editingStudent) return;
 
+    // Mật khẩu KHÔNG còn sửa ở form này nữa — dùng nút "🔑 Cấp MK" riêng
+    // (gọn, ít rủi ro nhầm lẫn hơn so với để chung trong form nhiều trường).
     const updatePayload: any = {
       code: editForm.code.trim().toUpperCase(),
       full_name: editForm.full_name.trim(),
@@ -2617,10 +2849,6 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
       class_role: editForm.class_role,
       group_number: editForm.group_number,
     };
-    // Chỉ cập nhật mật khẩu nếu GV có nhập mật khẩu mới (để trống thì giữ nguyên mật khẩu cũ)
-    if (editForm.password.trim()) {
-      updatePayload.password = editForm.password.trim();
-    }
 
     const { error } = await supabase.from('students').update(updatePayload).eq('id', editingStudent.id);
     if (error) {
@@ -2902,6 +3130,33 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
 
   return (
     <div className="p-6 max-w-7xl mx-auto space-y-6 text-xs font-sans">
+      {resetRequests.length > 0 && (
+        <div className="bg-amber-50 border border-amber-300 rounded-2xl p-4 space-y-2">
+          <h2 className="font-bold text-amber-900 flex items-center gap-1.5">
+            🔔 {resetRequests.length} Yêu Cầu Cấp Lại Mật Khẩu Từ Học Sinh
+          </h2>
+          <div className="space-y-1.5">
+            {resetRequests.map(r => (
+              <div key={r.id} className="flex items-center justify-between gap-3 bg-white p-2.5 rounded-xl border border-amber-200 flex-wrap">
+                <div>
+                  <span className="font-mono font-bold text-indigo-700 mr-1.5">{r.student_code}</span>
+                  <span className="font-semibold">{r.full_name}</span>
+                  {r.note && <span className="text-slate-500 italic ml-1.5">— "{r.note}"</span>}
+                </div>
+                <div className="flex gap-1.5 shrink-0">
+                  <button onClick={() => handleResolveFromRequest(r)} className="bg-indigo-600 hover:bg-indigo-700 text-white px-2.5 py-1 rounded-lg font-bold">
+                    Cấp Lại Mật Khẩu
+                  </button>
+                  <button onClick={() => handleDismissResetRequest(r.id)} className="bg-slate-100 hover:bg-slate-200 text-slate-600 px-2.5 py-1 rounded-lg font-bold">
+                    Bỏ Qua
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="bg-white p-6 rounded-2xl border shadow-sm flex justify-between items-center flex-wrap gap-4">
         <div>
           <h1 className="text-xl font-bold text-slate-800">Bảng Quản Lý Lớp Chủ Nhiệm - {teacher.full_name}</h1>
@@ -2989,6 +3244,9 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
                     <td className="p-3 text-center space-x-1">
                       <button onClick={() => handleOpenEditStudent(s)} className="bg-indigo-50 text-indigo-700 border border-indigo-200 px-2.5 py-1 rounded-lg font-bold hover:bg-indigo-100">
                         ✏️ Sửa
+                      </button>
+                      <button onClick={() => handleOpenResetPassword(s)} className="bg-amber-50 text-amber-700 border border-amber-200 px-2.5 py-1 rounded-lg font-bold hover:bg-amber-100">
+                        🔑 Cấp MK
                       </button>
                       <button onClick={() => handleDeleteStudent(s.id)} className="p-1.5 text-rose-600 hover:bg-rose-50 rounded">
                         <Trash2 className="w-4 h-4 inline" />
@@ -3583,15 +3841,8 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
                 </div>
               </div>
 
-              <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl space-y-1.5">
-                <label className="font-bold text-amber-800 block">🔒 Cấp lại / Đổi Mật khẩu đăng nhập:</label>
-                <input
-                  type="text" placeholder="Để trống nếu không muốn đổi mật khẩu hiện tại"
-                  value={editForm.password}
-                  onChange={e => setEditForm({ ...editForm, password: e.target.value })}
-                  className="w-full p-2 border rounded-xl font-mono bg-white"
-                />
-                <p className="text-[11px] text-amber-700 italic">* Chỉ nhập khi cần cấp mật khẩu mới cho học sinh (VD: học sinh quên mật khẩu). Để trống sẽ giữ nguyên mật khẩu cũ.</p>
+              <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl">
+                <p className="text-[11px] text-slate-500 italic">🔑 Để cấp lại mật khẩu cho học sinh này, đóng cửa sổ này rồi bấm nút "🔑 Cấp MK" ở bảng danh sách học sinh.</p>
               </div>
 
               <div className="flex gap-2 pt-2">
@@ -3600,6 +3851,40 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
                 </button>
                 <button type="submit" className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow transition">
                   Lưu Thay Đổi
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {resetPasswordTarget && (
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-white max-w-sm w-full rounded-2xl shadow-2xl p-6 space-y-4 text-xs">
+            <div className="flex justify-between items-center border-b pb-3">
+              <h2 className="text-base font-bold text-amber-900 flex items-center gap-1.5">🔑 Cấp Lại Mật Khẩu</h2>
+              <button onClick={handleCloseResetPassword} className="text-slate-400 hover:text-slate-600 font-bold text-lg">✕</button>
+            </div>
+            <p className="text-slate-600">
+              Học sinh: <span className="font-mono font-bold text-indigo-700">{resetPasswordTarget.code}</span> — <strong>{resetPasswordTarget.full_name}</strong>
+            </p>
+            <form onSubmit={handleSaveResetPassword} className="space-y-3">
+              <div>
+                <label className="font-semibold block mb-1">Mật khẩu mới (*):</label>
+                <input
+                  type="text" required autoFocus placeholder="Gõ mật khẩu mới cho học sinh"
+                  value={resetPasswordValue}
+                  onChange={e => setResetPasswordValue(e.target.value)}
+                  className="w-full p-2.5 border rounded-xl font-mono"
+                />
+                <p className="text-[11px] text-slate-500 mt-1 italic">* Sau khi lưu, hãy báo mật khẩu này cho học sinh qua kênh riêng (app không tự gửi thông báo).</p>
+              </div>
+              <div className="flex gap-2 pt-1">
+                <button type="button" onClick={handleCloseResetPassword} className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition">
+                  Hủy
+                </button>
+                <button type="submit" disabled={resetPasswordSaving} className="flex-1 py-2.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-xl shadow transition">
+                  {resetPasswordSaving ? 'Đang lưu...' : 'Cấp Mật Khẩu'}
                 </button>
               </div>
             </form>

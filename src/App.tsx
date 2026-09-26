@@ -94,6 +94,16 @@ interface OralGradeClass {
   id: string;
   teacher_id: string;
   class_name: string;
+  calc_method: 'average' | 'max';
+}
+
+interface OralGradeBonus {
+  id: string;
+  class_id: string;
+  student_id: string;
+  bonus_date: string;
+  points: number;
+  note?: string;
 }
 
 interface OralGradeStudent {
@@ -2323,6 +2333,7 @@ function OralGradesTab({ teacher }: { teacher: Teacher }) {
   const [newClassName, setNewClassName] = useState('');
   const [students, setStudents] = useState<OralGradeStudent[]>([]);
   const [records, setRecords] = useState<OralGradeRecord[]>([]);
+  const [bonusPoints, setBonusPoints] = useState<OralGradeBonus[]>([]);
   const [importing, setImporting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -2330,10 +2341,15 @@ function OralGradesTab({ teacher }: { teacher: Teacher }) {
   const [entryDate, setEntryDate] = useState(new Date().toISOString().slice(0, 10));
   const [entryScore, setEntryScore] = useState('');
 
+  const [bonusStudentId, setBonusStudentId] = useState('');
+  const [bonusDate, setBonusDate] = useState(new Date().toISOString().slice(0, 10));
+  const [bonusScore, setBonusScore] = useState('');
+  const [bonusNote, setBonusNote] = useState('');
+
   useEffect(() => { fetchClasses(); }, [teacher.id]);
   useEffect(() => {
     if (selectedClassId) fetchClassData();
-    else { setStudents([]); setRecords([]); }
+    else { setStudents([]); setRecords([]); setBonusPoints([]); }
   }, [selectedClassId]);
 
   const fetchClasses = async () => {
@@ -2346,12 +2362,14 @@ function OralGradesTab({ teacher }: { teacher: Teacher }) {
   };
 
   const fetchClassData = async () => {
-    const [stRes, recRes] = await Promise.all([
+    const [stRes, recRes, bonusRes] = await Promise.all([
       supabase.from('oral_grade_students').select('*').eq('class_id', selectedClassId).order('full_name', { ascending: true }),
       supabase.from('oral_grade_records').select('*').eq('class_id', selectedClassId).order('grade_date', { ascending: false }),
+      supabase.from('oral_grade_bonus_points').select('*').eq('class_id', selectedClassId).order('bonus_date', { ascending: false }),
     ]);
     if (stRes.data) setStudents(stRes.data as OralGradeStudent[]);
     if (recRes.data) setRecords(recRes.data as OralGradeRecord[]);
+    if (bonusRes.data) setBonusPoints(bonusRes.data as OralGradeBonus[]);
   };
 
   const handleCreateClass = async (e: React.FormEvent) => {
@@ -2368,10 +2386,16 @@ function OralGradesTab({ teacher }: { teacher: Teacher }) {
   };
 
   const handleDeleteClass = async (id: string) => {
-    if (!confirm('Xóa lớp này? Toàn bộ danh sách học sinh và điểm miệng của lớp sẽ bị xóa theo.')) return;
+    if (!confirm('Xóa lớp này? Toàn bộ danh sách học sinh, điểm miệng và điểm cộng của lớp sẽ bị xóa theo.')) return;
     const { error } = await supabase.from('oral_grade_classes').delete().eq('id', id);
     if (error) { alert('Lỗi xóa lớp: ' + error.message); return; }
     if (selectedClassId === id) setSelectedClassId('');
+    fetchClasses();
+  };
+
+  const handleChangeCalcMethod = async (method: 'average' | 'max') => {
+    const { error } = await supabase.from('oral_grade_classes').update({ calc_method: method }).eq('id', selectedClassId);
+    if (error) { alert('Lỗi cập nhật cách tính điểm: ' + error.message); return; }
     fetchClasses();
   };
 
@@ -2413,7 +2437,7 @@ function OralGradesTab({ teacher }: { teacher: Teacher }) {
   };
 
   const handleDeleteStudent = async (id: string) => {
-    if (!confirm('Xóa học sinh này khỏi danh sách? Điểm miệng đã nhập của học sinh này cũng sẽ bị xóa.')) return;
+    if (!confirm('Xóa học sinh này khỏi danh sách? Điểm miệng và điểm cộng đã nhập của học sinh này cũng sẽ bị xóa.')) return;
     await supabase.from('oral_grade_students').delete().eq('id', id);
     fetchClassData();
   };
@@ -2443,6 +2467,32 @@ function OralGradesTab({ teacher }: { teacher: Teacher }) {
     fetchClassData();
   };
 
+  const handleAddBonus = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!bonusStudentId || !bonusDate || bonusScore === '') {
+      alert('Vui lòng chọn học sinh, nhập ngày tháng và số điểm cộng.');
+      return;
+    }
+    const bonusNum = Number(bonusScore);
+    if (isNaN(bonusNum) || bonusNum < 0) {
+      alert('Điểm cộng phải là số không âm.');
+      return;
+    }
+    const { error } = await supabase.from('oral_grade_bonus_points').insert([
+      { class_id: selectedClassId, student_id: bonusStudentId, bonus_date: bonusDate, points: bonusNum, note: bonusNote.trim() || null }
+    ]);
+    if (error) { alert('Lỗi lưu điểm cộng: ' + error.message); return; }
+    setBonusScore('');
+    setBonusNote('');
+    fetchClassData();
+  };
+
+  const handleDeleteBonus = async (id: string) => {
+    if (!confirm('Xóa điểm cộng này?')) return;
+    await supabase.from('oral_grade_bonus_points').delete().eq('id', id);
+    fetchClassData();
+  };
+
   const handleExportRecords = () => {
     const cls = classes.find(c => c.id === selectedClassId);
     const data = records.map(r => {
@@ -2456,6 +2506,40 @@ function OralGradesTab({ teacher }: { teacher: Teacher }) {
   };
 
   const selectedClass = classes.find(c => c.id === selectedClassId);
+  const calcMethod: 'average' | 'max' = selectedClass?.calc_method || 'average';
+
+  // Bảng tổng hợp: gộp toàn bộ điểm miệng + điểm cộng của TỪNG học sinh lại
+  // thành 1 dòng duy nhất, để dễ thống kê thay vì phải dò trong nhật ký rời rạc.
+  // Điểm Tổng Kết = (Trung bình cộng HOẶC Điểm cao nhất, tùy lựa chọn của
+  // GVCN cho lớp này) + (Tổng Điểm Cộng ÷ 10, làm tròn xuống) — tối đa 10.
+  const studentSummaries = students.map(s => {
+    const myRecords = records.filter(r => r.student_id === s.id).sort((a, b) => a.grade_date.localeCompare(b.grade_date));
+    const scores = myRecords.map(r => r.score);
+    const average = scores.length > 0 ? scores.reduce((sum, v) => sum + v, 0) / scores.length : 0;
+    const max = scores.length > 0 ? Math.max(...scores) : 0;
+    const baseScore = calcMethod === 'max' ? max : average;
+    const totalBonus = bonusPoints.filter(b => b.student_id === s.id).reduce((sum, b) => sum + Number(b.points), 0);
+    const bonusAdd = Math.floor(totalBonus / 10);
+    const finalScore = Math.min(10, baseScore + bonusAdd);
+    return { student: s, scores, myRecords, average, max, totalBonus, bonusAdd, finalScore, count: scores.length };
+  }).sort((a, b) => a.student.full_name.localeCompare(b.student.full_name, 'vi'));
+
+  const handleExportSummary = () => {
+    const cls = classes.find(c => c.id === selectedClassId);
+    const data = studentSummaries.map(sum => ({
+      'Họ và tên': sum.student.full_name,
+      'Số lần chấm': sum.count,
+      'Các điểm đã chấm': sum.scores.join(', '),
+      [calcMethod === 'max' ? 'Điểm cao nhất' : 'Điểm trung bình']: Number((calcMethod === 'max' ? sum.max : sum.average).toFixed(2)),
+      'Tổng điểm cộng': sum.totalBonus,
+      'Điểm cộng thêm (÷10)': sum.bonusAdd,
+      'Điểm tổng kết': Number(sum.finalScore.toFixed(2)),
+    }));
+    const ws = XLSX.utils.json_to_sheet(data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'TongHopDiemMieng');
+    XLSX.writeFile(wb, `TongHopDiemMieng_${cls?.class_name || 'Lop'}.xlsx`);
+  };
 
   return (
     <div className="space-y-6 text-xs font-sans">
@@ -2500,26 +2584,113 @@ function OralGradesTab({ teacher }: { teacher: Teacher }) {
             </div>
           </div>
 
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="bg-white p-5 rounded-2xl border shadow-sm space-y-3">
+              <h2 className="font-bold text-slate-800 text-sm">Nhập Điểm Miệng</h2>
+              {students.length === 0 ? (
+                <p className="text-slate-400 italic">Lớp chưa có học sinh — đẩy danh sách từ Excel ở trên trước.</p>
+              ) : (
+                <form onSubmit={handleAddRecord} className="space-y-3">
+                  <select value={entryStudentId} onChange={e => setEntryStudentId(e.target.value)} className="w-full p-2 border rounded-xl" required>
+                    <option value="">-- Chọn học sinh --</option>
+                    {students.map(s => <option key={s.id} value={s.id}>{s.full_name}</option>)}
+                  </select>
+                  <div className="grid grid-cols-2 gap-3">
+                    <input type="date" value={entryDate} onChange={e => setEntryDate(e.target.value)} className="p-2 border rounded-xl" required />
+                    <input type="number" min="0" max="10" step="0.1" placeholder="Điểm (0-10)" value={entryScore} onChange={e => setEntryScore(e.target.value)} className="p-2 border rounded-xl" required />
+                  </div>
+                  <button type="submit" className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl py-2.5 shadow">Lưu Điểm Miệng</button>
+                </form>
+              )}
+            </div>
+
+            <div className="bg-white p-5 rounded-2xl border shadow-sm space-y-3">
+              <h2 className="font-bold text-slate-800 text-sm">Nhập Điểm Cộng <span className="text-slate-400 font-normal">(cứ 10 điểm cộng = +1 điểm tổng kết)</span></h2>
+              {students.length === 0 ? (
+                <p className="text-slate-400 italic">Lớp chưa có học sinh.</p>
+              ) : (
+                <form onSubmit={handleAddBonus} className="space-y-3">
+                  <select value={bonusStudentId} onChange={e => setBonusStudentId(e.target.value)} className="w-full p-2 border rounded-xl" required>
+                    <option value="">-- Chọn học sinh --</option>
+                    {students.map(s => <option key={s.id} value={s.id}>{s.full_name}</option>)}
+                  </select>
+                  <div className="grid grid-cols-2 gap-3">
+                    <input type="date" value={bonusDate} onChange={e => setBonusDate(e.target.value)} className="p-2 border rounded-xl" required />
+                    <input type="number" min="0" step="1" placeholder="Số điểm cộng" value={bonusScore} onChange={e => setBonusScore(e.target.value)} className="p-2 border rounded-xl" required />
+                  </div>
+                  <input type="text" placeholder="Ghi chú (VD: Phát biểu xây dựng bài)" value={bonusNote} onChange={e => setBonusNote(e.target.value)} className="w-full p-2 border rounded-xl" />
+                  <button type="submit" className="w-full bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-xl py-2.5 shadow">Lưu Điểm Cộng</button>
+                </form>
+              )}
+            </div>
+          </div>
+
           <div className="bg-white p-5 rounded-2xl border shadow-sm space-y-3">
-            <h2 className="font-bold text-slate-800 text-sm">Nhập Điểm Miệng</h2>
-            {students.length === 0 ? (
-              <p className="text-slate-400 italic">Lớp chưa có học sinh — đẩy danh sách từ Excel ở trên trước.</p>
-            ) : (
-              <form onSubmit={handleAddRecord} className="grid grid-cols-1 md:grid-cols-4 gap-3">
-                <select value={entryStudentId} onChange={e => setEntryStudentId(e.target.value)} className="p-2 border rounded-xl md:col-span-2" required>
-                  <option value="">-- Chọn học sinh --</option>
-                  {students.map(s => <option key={s.id} value={s.id}>{s.full_name}</option>)}
+            <div className="flex justify-between items-center flex-wrap gap-3">
+              <div>
+                <h2 className="font-bold text-slate-800 text-sm">📊 Bảng Tổng Hợp Điểm Miệng Theo Học Sinh</h2>
+                <p className="text-slate-500 text-[11px] mt-1">Gộp toàn bộ điểm đã chấm của mỗi học sinh vào 1 dòng — dễ nhìn tổng quan và thống kê hơn nhật ký rời rạc bên dưới.</p>
+              </div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <label className="font-semibold">Cách tính điểm tổng kết:</label>
+                <select value={calcMethod} onChange={e => handleChangeCalcMethod(e.target.value as 'average' | 'max')} className="p-2 border rounded-xl font-bold">
+                  <option value="average">Trung bình cộng</option>
+                  <option value="max">Lấy điểm cao nhất</option>
                 </select>
-                <input type="date" value={entryDate} onChange={e => setEntryDate(e.target.value)} className="p-2 border rounded-xl" required />
-                <input type="number" min="0" max="10" step="0.1" placeholder="Điểm (0-10)" value={entryScore} onChange={e => setEntryScore(e.target.value)} className="p-2 border rounded-xl" required />
-                <button type="submit" className="md:col-span-4 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl py-2.5 shadow">Lưu Điểm</button>
-              </form>
+                <button onClick={handleExportSummary} className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-2 rounded-xl font-bold">📥 Xuất Bảng Tổng Hợp</button>
+              </div>
+            </div>
+
+            {studentSummaries.length === 0 ? (
+              <p className="text-slate-400 italic p-3">Chưa có học sinh nào trong lớp.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead className="bg-slate-50 font-bold border-b text-slate-700">
+                    <tr>
+                      <th className="p-2 border-r">Họ và Tên</th>
+                      <th className="p-2 border-r">Các Điểm Đã Chấm</th>
+                      <th className="p-2 border-r text-center">{calcMethod === 'max' ? 'Điểm Cao Nhất' : 'Điểm Trung Bình'}</th>
+                      <th className="p-2 border-r text-center">Tổng Điểm Cộng</th>
+                      <th className="p-2 border-r text-center">+Điểm Cộng Thêm</th>
+                      <th className="p-2 border-r text-center">Điểm Tổng Kết</th>
+                      <th className="p-2 text-center">Thao Tác</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {studentSummaries.map(sum => (
+                      <tr key={sum.student.id} className="hover:bg-slate-50">
+                        <td className="p-2 border-r font-semibold">{sum.student.full_name}</td>
+                        <td className="p-2 border-r">
+                          {sum.scores.length === 0 ? (
+                            <span className="text-slate-400 italic">Chưa có điểm</span>
+                          ) : (
+                            <span className="font-mono">{sum.scores.join(', ')}</span>
+                          )}
+                          <span className="text-slate-400"> ({sum.count} lần)</span>
+                        </td>
+                        <td className="p-2 border-r text-center font-bold text-indigo-700">
+                          {sum.scores.length === 0 ? '—' : (calcMethod === 'max' ? sum.max : sum.average.toFixed(2))}
+                        </td>
+                        <td className="p-2 border-r text-center font-bold text-amber-700">{sum.totalBonus}</td>
+                        <td className="p-2 border-r text-center font-bold text-amber-700">+{sum.bonusAdd}</td>
+                        <td className="p-2 border-r text-center font-black text-emerald-700 text-sm">{sum.finalScore.toFixed(2)}</td>
+                        <td className="p-2 text-center">
+                          <button onClick={() => handleDeleteStudent(sum.student.id)} className="p-1.5 text-rose-600 hover:bg-rose-50 rounded">
+                            <Trash2 className="w-4 h-4 inline" />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
           </div>
 
           <div className="bg-white p-5 rounded-2xl border shadow-sm space-y-3">
             <div className="flex justify-between items-center flex-wrap gap-3">
-              <h2 className="font-bold text-slate-800 text-sm">Bảng Điểm Miệng Đã Nhập</h2>
+              <h2 className="font-bold text-slate-800 text-sm">Nhật Ký Chi Tiết Từng Lượt Chấm Điểm Miệng</h2>
               <button onClick={handleExportRecords} className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-2 rounded-xl font-bold">📥 Xuất Excel</button>
             </div>
             <div className="overflow-x-auto">
@@ -2554,38 +2725,47 @@ function OralGradesTab({ teacher }: { teacher: Teacher }) {
             </div>
           </div>
 
-          <div className="bg-white rounded-2xl border shadow-sm overflow-x-auto">
-            <table className="w-full text-left border-collapse">
-              <thead className="bg-slate-50 font-bold border-b text-slate-700">
-                <tr>
-                  <th className="p-3 border-r">Họ và Tên</th>
-                  <th className="p-3 border-r text-center">Số Lần Đã Nhập Điểm</th>
-                  <th className="p-3 text-center">Thao Tác</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y">
-                {students.map(s => (
-                  <tr key={s.id} className="hover:bg-slate-50">
-                    <td className="p-3 border-r font-semibold">{s.full_name}</td>
-                    <td className="p-3 border-r text-center">{records.filter(r => r.student_id === s.id).length}</td>
-                    <td className="p-3 text-center">
-                      <button onClick={() => handleDeleteStudent(s.id)} className="p-1.5 text-rose-600 hover:bg-rose-50 rounded">
-                        <Trash2 className="w-4 h-4 inline" />
-                      </button>
-                    </td>
+          <div className="bg-white p-5 rounded-2xl border shadow-sm space-y-3">
+            <h2 className="font-bold text-slate-800 text-sm">Nhật Ký Điểm Cộng Đã Nhập</h2>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead className="bg-slate-50 font-bold border-b text-slate-700">
+                  <tr>
+                    <th className="p-2 border-r">Ngày Tháng</th>
+                    <th className="p-2 border-r">Họ và Tên</th>
+                    <th className="p-2 border-r text-center">Điểm Cộng</th>
+                    <th className="p-2 border-r">Ghi Chú</th>
+                    <th className="p-2 text-center">Thao Tác</th>
                   </tr>
-                ))}
-                {students.length === 0 && (
-                  <tr><td colSpan={3} className="p-3 text-slate-400 italic">Chưa có học sinh nào.</td></tr>
-                )}
-              </tbody>
-            </table>
+                </thead>
+                <tbody className="divide-y">
+                  {bonusPoints.map(b => {
+                    const st = students.find(s => s.id === b.student_id);
+                    return (
+                      <tr key={b.id} className="hover:bg-slate-50">
+                        <td className="p-2 border-r font-mono">{b.bonus_date}</td>
+                        <td className="p-2 border-r font-semibold">{st?.full_name || '(đã xóa)'}</td>
+                        <td className="p-2 border-r text-center font-bold text-amber-700">+{b.points}</td>
+                        <td className="p-2 border-r text-slate-500 italic">{b.note || '—'}</td>
+                        <td className="p-2 text-center">
+                          <button onClick={() => handleDeleteBonus(b.id)} className="p-1.5 text-rose-600 hover:bg-rose-50 rounded">
+                            <Trash2 className="w-4 h-4 inline" />
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              {bonusPoints.length === 0 && <p className="text-slate-400 italic p-3">Chưa có điểm cộng nào được nhập.</p>}
+            </div>
           </div>
         </>
       )}
     </div>
   );
 }
+
 
 function TeacherDashboard({ teacher }: { teacher: Teacher }) {
   const [activeTab, setActiveTab] = useState<'students' | 'fees' | 'announcements' | 'reports' | 'groups' | 'rules' | 'oral_grades'>('students');

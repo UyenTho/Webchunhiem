@@ -15,6 +15,7 @@ interface Teacher {
   school?: string;
   is_approved: boolean;
   is_admin: boolean;
+  class_code?: string;
 }
 
 interface Student {
@@ -118,7 +119,7 @@ const UNIQUE_CLASS_ROLES: string[] = ['Lớp trưởng', 'Lớp phó học tập
 
 // Bỏ dấu tiếng Việt + chữ thường + gộp khoảng trắng → dùng để so khớp chức vụ nhập từ Excel.
 const toRoleKey = (s: string): string =>
-  s.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'd')
+  s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'd')
     .toLowerCase().replace(/\s+/g, ' ').trim();
 
 // Một số cách viết tắt hay gặp khi GV gõ trong file Excel.
@@ -147,6 +148,116 @@ const normalizeRole = (raw: any): string => {
 // (dữ liệu cũ / nhập từ Excel), vẫn hiển thị đúng chức vụ đó thay vì hiển thị sai thành 'Học sinh'.
 const getRoleOptions = (current?: string): string[] =>
   current && !ROLES.includes(current) ? [...ROLES, current] : ROLES;
+
+// ==================== TIỆN ÍCH NGÀY THÁNG ====================
+// KHÔNG dùng new Date().toISOString().slice(0, 10) để lấy "hôm nay": toISOString trả về giờ UTC,
+// ở Việt Nam (UTC+7) từ 0h–7h sáng sẽ bị lùi về NGÀY HÔM TRƯỚC.
+const pad2 = (n: number): string => String(n).padStart(2, '0');
+const todayLocalISO = (): string => {
+  const d = new Date();
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+};
+const isValidYMD = (y: number, m: number, d: number): boolean => {
+  if (y < 1900 || y > 2100) return false;
+  const dt = new Date(y, m - 1, d);
+  return dt.getFullYear() === y && dt.getMonth() === m - 1 && dt.getDate() === d;
+};
+const toYMD = (y: number, m: number, d: number): string | null =>
+  isValidYMD(y, m, d) ? `${y}-${pad2(m)}-${pad2(d)}` : null;
+
+// Đọc ngày sinh từ ô Excel → 'YYYY-MM-DD' (hoặc null nếu không đọc được).
+// Hỗ trợ: số serial của Excel (kể cả hệ ngày 1904 trên Excel Mac), chuỗi dd/mm/yyyy, d-m-yyyy, yyyy-mm-dd.
+// Tự tính từ serial (theo UTC) để không bị lệch 1 ngày do múi giờ như khi dùng cellDates + toISOString.
+const excelDateToISO = (v: any, date1904 = false): string | null => {
+  if (v === null || v === undefined || v === '') return null;
+  if (v instanceof Date) {
+    if (isNaN(v.getTime())) return null;
+    const t = new Date(v.getTime() + 12 * 3600 * 1000); // bù sai số vài phút/giây quanh nửa đêm
+    return toYMD(t.getFullYear(), t.getMonth() + 1, t.getDate());
+  }
+  const fromSerial = (serial: number): string | null => {
+    if (!isFinite(serial) || serial < 1) return null;
+    const days = Math.floor(serial + 1e-7) + (date1904 ? 1462 : 0);
+    const dt = new Date(Date.UTC(1899, 11, 30) + days * 86400000);
+    return toYMD(dt.getUTCFullYear(), dt.getUTCMonth() + 1, dt.getUTCDate());
+  };
+  if (typeof v === 'number') return fromSerial(v);
+  const s = String(v).trim();
+  let m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})$/);
+  if (m) return toYMD(Number(m[3]), Number(m[2]), Number(m[1]));
+  m = s.match(/^(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})/);
+  if (m) return toYMD(Number(m[1]), Number(m[2]), Number(m[3]));
+  if (/^\d{4,6}(\.\d+)?$/.test(s)) return fromSerial(Number(s));
+  return null;
+};
+const formatDateVN = (iso?: string | null): string => {
+  if (!iso) return '';
+  const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : iso;
+};
+
+// ==================== ĐIỂM KIỂM TRA MIỆNG — QUY TẮC TÍNH ====================
+// • Mỗi ngày GV có thể nhập cho 1 học sinh: điểm miệng (0–10, có thể để trống), số điểm cộng, số điểm trừ.
+// • Điểm cộng và điểm trừ được tính RIÊNG: mỗi loại đủ 10 thì quy đổi thành 1 điểm chính
+//   (VD 13 cộng, 8 trừ → +1; còn dư 3 cộng, 8 trừ để tích lũy tiếp).
+// • Điểm quy đổi được áp vào TỪNG LẦN KIỂM TRA:
+//     - apply_mode = 'next'    : áp vào lần kiểm tra miệng kế tiếp (tính cả lần kiểm tra cùng ngày).
+//     - apply_mode = 'previous': áp ngay vào lần kiểm tra gần nhất trước đó (chưa có lần nào thì chờ lần đầu tiên).
+//   Cuối kì, nếu còn đủ 10 mà không còn lần kiểm tra nào phía sau → áp vào lần kiểm tra gần nhất (không bị mất).
+// • Điểm mỗi lần sau quy đổi luôn nằm trong [0; 10].
+// • Kết quả học kì: Trung bình cộng các lần (đã quy đổi) HOẶC Điểm cao nhất — làm tròn 1 chữ số thập phân.
+const ORAL_POINTS_PER_UNIT = 10;
+const round1 = (x: number): number => Math.round((x + 1e-9) * 10) / 10;
+const clamp010 = (x: number): number => Math.min(10, Math.max(0, x));
+const formatScore = (x: number | null | undefined, fixed1 = false): string =>
+  x === null || x === undefined ? '—' : (fixed1 ? x.toFixed(1) : String(x)).replace('.', ',');
+
+interface OralTestResult { date: string; raw: number; bonus: number; penalty: number; adjusted: number; }
+interface OralSummary {
+  tests: OralTestResult[];
+  totalPlus: number; totalMinus: number;
+  plusLeft: number; minusLeft: number;
+  average: number | null; max: number | null; final: number | null;
+}
+
+const computeOralSummary = (
+  entries: { entry_date: string; score: number | null; plus_points: number; minus_points: number }[],
+  calcMethod: 'average' | 'max',
+  applyMode: 'next' | 'previous'
+): OralSummary => {
+  const sorted = [...entries].sort((a, b) => a.entry_date.localeCompare(b.entry_date));
+  const tests: OralTestResult[] = [];
+  let plusC = 0, minusC = 0, totalPlus = 0, totalMinus = 0;
+
+  const applyUnits = (t: OralTestResult) => {
+    const b = Math.floor(plusC / ORAL_POINTS_PER_UNIT);
+    const p = Math.floor(minusC / ORAL_POINTS_PER_UNIT);
+    if (b === 0 && p === 0) return;
+    t.bonus += b; t.penalty += p;
+    plusC -= b * ORAL_POINTS_PER_UNIT; minusC -= p * ORAL_POINTS_PER_UNIT;
+    t.adjusted = clamp010(t.raw + t.bonus - t.penalty);
+  };
+
+  for (const e of sorted) {
+    const plus = Math.max(0, Math.floor(Number(e.plus_points) || 0));
+    const minus = Math.max(0, Math.floor(Number(e.minus_points) || 0));
+    plusC += plus; minusC += minus; totalPlus += plus; totalMinus += minus;
+    const hasScore = e.score !== null && e.score !== undefined && (e.score as any) !== '' && !isNaN(Number(e.score));
+    if (hasScore) {
+      const raw = clamp010(Number(e.score));
+      tests.push({ date: e.entry_date, raw, bonus: 0, penalty: 0, adjusted: raw });
+    }
+    if (tests.length > 0 && (applyMode === 'previous' || hasScore)) applyUnits(tests[tests.length - 1]);
+  }
+  if (tests.length > 0) applyUnits(tests[tests.length - 1]);
+
+  const average = tests.length ? round1(tests.reduce((s, t) => s + t.adjusted, 0) / tests.length) : null;
+  const max = tests.length ? round1(Math.max(...tests.map(t => t.adjusted))) : null;
+  return {
+    tests, totalPlus, totalMinus, plusLeft: plusC, minusLeft: minusC,
+    average, max, final: calcMethod === 'max' ? max : average,
+  };
+};
 
 export default function App() {
   const [currentView, setCurrentView] = useState<ViewType>('login');
@@ -263,9 +374,14 @@ export default function App() {
           )}
           <StudentPortal
             student={loggedInStudent}
-            onRefreshStudent={async () => {
-              const { data } = await supabase.from('students').select('*').eq('id', loggedInStudent.id).maybeSingle();
-              if (data) setLoggedInStudent(data as Student);
+            onRefreshStudent={async (newPassword?: string) => {
+              const pw = newPassword ?? loggedInStudent.password ?? '';
+              const { data, error } = await supabase.rpc('student_get_self', {
+                p_student_id: loggedInStudent.id,
+                p_password: pw,
+              });
+              const row = Array.isArray(data) ? data[0] : data;
+              if (!error && row && row.id) setLoggedInStudent({ ...(row as Student), password: pw });
             }}
           />
         </div>
@@ -382,10 +498,9 @@ function LoginScreen({ onTeacherLogin, onStudentLogin, onAdminLogin, onForgotPas
     if (!studentCode.trim() || !studentPassword.trim() || !matchedTeacher) return;
     setLoading(true);
 
-    // LƯU Ý QUAN TRỌNG: Hàm RPC "student_login" trong Supabase cần được cập nhật để
-    // nhận thêm tham số p_password và đối chiếu với cột "password" của học sinh
-    // (chỉ trả về kết quả khi MSHS VÀ Mật khẩu đều khớp). Nếu RPC hiện tại chưa hỗ
-    // trợ tham số này, cần sửa lại function trong Supabase (SQL Editor) tương ứng.
+    // RPC "student_login" (file SQL 03) đối chiếu MSHS + Mật khẩu ở phía máy chủ và trả về hồ sơ học sinh
+    // KHÔNG kèm cột password. Mật khẩu em vừa nhập được giữ trong bộ nhớ phiên đăng nhập để dùng cho các
+    // thao tác cần xác thực lại (lưu khảo sát, đổi mật khẩu, lớp trưởng ghi điểm).
     const { data, error: rpcErr } = await supabase.rpc('student_login', {
       p_teacher_id: matchedTeacher.id,
       p_code: studentCode.trim(),
@@ -394,12 +509,19 @@ function LoginScreen({ onTeacherLogin, onStudentLogin, onAdminLogin, onForgotPas
 
     setLoading(false);
 
-    if (rpcErr || !data || data.length === 0) {
+    if (rpcErr) {
+      setError(rpcErr.message.includes('student_login')
+        ? 'Hệ thống chưa cập nhật hàm đăng nhập học sinh. Vui lòng báo Giáo viên chủ nhiệm.'
+        : 'Lỗi đăng nhập: ' + rpcErr.message);
+      return;
+    }
+    const row = Array.isArray(data) ? data[0] : data;
+    if (!row || !row.id) {
       setError('Mã Số Học Sinh hoặc Mật khẩu không đúng trong lớp này!');
       return;
     }
 
-    onStudentLogin(data[0] as Student);
+    onStudentLogin({ ...(row as Student), password: studentPassword.trim() });
   };
 
   return (
@@ -602,7 +724,7 @@ function RegisterWithPaymentScreen({ onSuccess, onCancel }: any) {
 }
 
 // ==================== 3. CỔNG THÔNG TIN DÀNH CHO HỌC SINH ====================
-function StudentPortal({ student, onRefreshStudent }: { student: Student; onRefreshStudent: () => void }) {
+function StudentPortal({ student, onRefreshStudent }: { student: Student; onRefreshStudent: (newPassword?: string) => void }) {
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [feeItems, setFeeItems] = useState<FeeItem[]>([]);
   const [feePayments, setFeePayments] = useState<FeePayment[]>([]);
@@ -684,10 +806,12 @@ function StudentPortal({ student, onRefreshStudent }: { student: Student; onRefr
 
   const handleSaveSurvey = async (e: React.FormEvent) => {
     e.preventDefault();
-    const { error } = await supabase.from('students').update({
-      survey_completed: true,
-      survey_info: surveyData
-    }).eq('id', student.id);
+    // Ghi qua RPC (kiểm tra lại mật khẩu ở máy chủ) — học sinh không còn quyền UPDATE trực tiếp bảng students.
+    const { error } = await supabase.rpc('student_save_survey', {
+      p_student_id: student.id,
+      p_password: student.password || '',
+      p_survey: surveyData,
+    });
 
     if (error) {
       alert('Lỗi lưu khảo sát: ' + error.message);
@@ -706,36 +830,38 @@ function StudentPortal({ student, onRefreshStudent }: { student: Student; onRefr
       alert('Vui lòng nhập đầy đủ Mật khẩu hiện tại, Mật khẩu mới và Nhập lại mật khẩu mới.');
       return;
     }
-    if (pwForm.current !== (student.password || '')) {
-      alert('Mật khẩu hiện tại không đúng!');
-      return;
-    }
-    if (pwForm.next.length < 4) {
+    if (pwForm.next.trim().length < 4) {
       alert('Mật khẩu mới phải có ít nhất 4 ký tự.');
       return;
     }
-    if (pwForm.next !== pwForm.confirm) {
+    if (pwForm.next.trim() !== pwForm.confirm.trim()) {
       alert('Mật khẩu mới và Nhập lại mật khẩu mới không khớp!');
       return;
     }
-    if (pwForm.next === pwForm.current) {
+    if (pwForm.next.trim() === pwForm.current.trim()) {
       alert('Mật khẩu mới phải khác mật khẩu hiện tại.');
       return;
     }
 
     setPwSaving(true);
-    const { error } = await supabase.from('students').update({ password: pwForm.next.trim() }).eq('id', student.id);
+    // Máy chủ tự kiểm tra Mật khẩu hiện tại (RPC student_change_password).
+    const newPw = pwForm.next.trim();
+    const { error } = await supabase.rpc('student_change_password', {
+      p_student_id: student.id,
+      p_old_password: pwForm.current.trim(),
+      p_new_password: newPw,
+    });
     setPwSaving(false);
 
     if (error) {
-      alert('Lỗi đổi mật khẩu: ' + error.message);
+      alert(error.message.includes('Mật khẩu') ? error.message : 'Lỗi đổi mật khẩu: ' + error.message);
       return;
     }
 
     alert('Đổi mật khẩu thành công! Hãy ghi nhớ mật khẩu mới cho lần đăng nhập sau.');
     setPwForm({ current: '', next: '', confirm: '' });
     setShowChangePassword(false);
-    onRefreshStudent();
+    onRefreshStudent(newPw);
   };
 
   const totalDeduction = (records || []).filter(r => r.type === 'violation').reduce((sum, r) => sum + Number(r.points || 0), 0);
@@ -1087,7 +1213,7 @@ function StudentPortal({ student, onRefreshStudent }: { student: Student; onRefr
 function ClassLeaderPortal({ student, onSwitchToStudentView }: { student: Student; onSwitchToStudentView: () => void }) {
   const [classStudents, setClassStudents] = useState<Student[]>([]);
   const [weekNumber, setWeekNumber] = useState<number>(1);
-  const [recordDate, setRecordDate] = useState<string>(new Date().toISOString().slice(0, 10));
+  const [recordDate, setRecordDate] = useState<string>(todayLocalISO());
   const [selectedStudentId, setSelectedStudentId] = useState('');
   const [recordType, setRecordType] = useState<'violation' | 'commendation'>('violation');
   const [content, setContent] = useState('');
@@ -1106,13 +1232,15 @@ function ClassLeaderPortal({ student, onSwitchToStudentView }: { student: Studen
   }, [student.id]);
 
   const fetchClassData = async () => {
+    // Chỉ lấy các cột công khai (học sinh không có quyền đọc cột mật khẩu, ngày sinh, khảo sát của bạn khác).
     const { data, error } = await supabase
       .from('students')
-      .select('*')
+      .select('id, teacher_id, code, full_name, class_role, group_number')
       .eq('teacher_id', student.teacher_id)
       .order('code', { ascending: true });
 
-    if (!error && data) setClassStudents(data as Student[]);
+    if (error) alert('Lỗi tải danh sách lớp: ' + error.message);
+    else if (data) setClassStudents(data as Student[]);
   };
 
   // Xử lý khi lớp trưởng chọn 1 nội dung trong dropdown quy định điểm
@@ -1139,6 +1267,7 @@ function ClassLeaderPortal({ student, onSwitchToStudentView }: { student: Studen
 
     const { error } = await supabase.rpc('leader_add_record', {
       p_leader_student_id: student.id,
+      p_password: student.password || '',
       p_target_student_id: selectedStudentId,
       p_week_number: weekNumber,
       p_record_date: recordDate,
@@ -1169,6 +1298,7 @@ function ClassLeaderPortal({ student, onSwitchToStudentView }: { student: Studen
 
     const { error } = await supabase.rpc('leader_submit_weekly_report', {
       p_leader_student_id: student.id,
+      p_password: student.password || '',
       p_week_number: weekNumber,
       p_title: title,
       p_content: summaryText,
@@ -1355,7 +1485,7 @@ function ClassLeaderPortal({ student, onSwitchToStudentView }: { student: Studen
 
 // ==================== 5. BẢNG ĐIỀU KHIỂN GIÁO VIÊN CHỦ NHIỆM ====================
 function TeacherDashboard({ teacher }: { teacher: Teacher }) {
-  const [activeTab, setActiveTab] = useState<'students' | 'fees' | 'announcements' | 'reports' | 'groups'>('students');
+  const [activeTab, setActiveTab] = useState<'students' | 'fees' | 'announcements' | 'reports' | 'groups' | 'oral'>('students');
   const [students, setStudents] = useState<Student[]>([]);
   const [feeItems, setFeeItems] = useState<FeeItem[]>([]);
   const [feePayments, setFeePayments] = useState<FeePayment[]>([]);
@@ -1365,6 +1495,7 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
   const [editForm, setEditForm] = useState({ code: '', full_name: '', dob: '', class_role: 'Học sinh', group_number: 1, password: '' });
   const [selectedWeek, setSelectedWeek] = useState<string>('all');
+  const [oralTabOpened, setOralTabOpened] = useState(false);
   const [selectedFeeForUnpaid, setSelectedFeeForUnpaid] = useState<string>('');
   const [importing, setImporting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -1623,13 +1754,14 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
     setImporting(true);
     try {
       const buf = await file.arrayBuffer();
-      const workbook = XLSX.read(buf, { cellDates: true });
+      // Không dùng cellDates + toISOString (bị lùi 1 ngày sinh do múi giờ UTC+7) → tự đọc ngày bằng excelDateToISO.
+      const workbook = XLSX.read(new Uint8Array(buf), { type: 'array' });
+      const date1904 = !!(workbook as any).Workbook?.WBProps?.date1904;
       const sheet = workbook.Sheets[workbook.SheetNames[0]];
       const rows: any[] = XLSX.utils.sheet_to_json(sheet, { defval: '' });
 
       const mapped = rows.map((r) => {
-        let dob = r['Ngày sinh'] || r['DOB'] || '';
-        if (dob instanceof Date) dob = dob.toISOString().slice(0, 10);
+        const dob = excelDateToISO(r['Ngày sinh'] || r['DOB'] || '', date1904);
         const code = String(r['MSHS'] || r['Mã số'] || '').trim().toUpperCase();
         // Nếu file Excel không có cột Mật khẩu (hoặc để trống), mặc định lấy MSHS làm mật khẩu ban đầu
         // — Giáo viên nên vào "Sửa" từng học sinh để đổi lại mật khẩu riêng cho bảo mật.
@@ -1754,7 +1886,7 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
   const handleAddFeeItem = async (e: React.FormEvent) => {
     e.preventDefault();
     const { error } = await supabase.from('fee_items').insert([
-      { teacher_id: teacher.id, title: feeTitle, amount: Number(feeAmount), deadline: feeDeadline }
+      { teacher_id: teacher.id, title: feeTitle.trim(), amount: Number(feeAmount), deadline: feeDeadline || null }
     ]);
     if (!error) {
       setFeeTitle(''); setFeeAmount(''); setFeeDeadline('');
@@ -1767,7 +1899,7 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
   const handleAddAnnouncement = async (e: React.FormEvent) => {
     e.preventDefault();
     const { error } = await supabase.from('announcements').insert([
-      { teacher_id: teacher.id, title: annTitle, content: annContent, important: annImportant, created_date: new Date().toISOString().slice(0, 10) }
+      { teacher_id: teacher.id, title: annTitle, content: annContent, important: annImportant, created_date: todayLocalISO() }
     ]);
     if (!error) {
       setAnnTitle(''); setAnnContent('');
@@ -1809,7 +1941,11 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
 
   const handleDeleteStudent = async (id: string) => {
     if (confirm('Xóa học sinh này khỏi danh sách lớp?')) {
-      await supabase.from('students').delete().eq('id', id);
+      const { error } = await supabase.from('students').delete().eq('id', id);
+      if (error) {
+        alert('Không xóa được học sinh: ' + error.message);
+        return;
+      }
       fetchData();
     }
   };
@@ -1820,6 +1956,9 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
         <div>
           <h1 className="text-xl font-bold text-slate-800">Bảng Quản Lý Lớp Chủ Nhiệm - {teacher.full_name}</h1>
           <p className="text-slate-500 mt-0.5">Trường: {teacher.school || 'THPT'} | Quản lý riêng danh sách học sinh</p>
+          {teacher.class_code && (
+            <p className="mt-1 text-slate-600">Mã Lớp cho học sinh đăng nhập: <strong className="font-mono text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded">{teacher.class_code}</strong></p>
+          )}
         </div>
         <div className="flex gap-2 flex-wrap">
           <button onClick={() => setActiveTab('students')} className={`px-4 py-2 rounded-xl font-bold transition ${activeTab === 'students' ? 'bg-indigo-600 text-white shadow' : 'bg-slate-100'}`}>👨‍🎓 Danh Sách Học Sinh</button>
@@ -1827,6 +1966,7 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
           <button onClick={() => setActiveTab('fees')} className={`px-4 py-2 rounded-xl font-bold transition ${activeTab === 'fees' ? 'bg-indigo-600 text-white shadow' : 'bg-slate-100'}`}>💰 Quản Lý Khoản Thu</button>
           <button onClick={() => setActiveTab('reports')} className={`px-4 py-2 rounded-xl font-bold transition ${activeTab === 'reports' ? 'bg-indigo-600 text-white shadow' : 'bg-slate-100'}`}>📊 Thi Đua & Báo Cáo</button>
           <button onClick={() => setActiveTab('announcements')} className={`px-4 py-2 rounded-xl font-bold transition ${activeTab === 'announcements' ? 'bg-indigo-600 text-white shadow' : 'bg-slate-100'}`}>📢 Thông Báo & Dặn Dò</button>
+          <button onClick={() => { setActiveTab('oral'); setOralTabOpened(true); }} className={`px-4 py-2 rounded-xl font-bold transition ${activeTab === 'oral' ? 'bg-indigo-600 text-white shadow' : 'bg-slate-100'}`}>📝 Điểm Kiểm Tra Miệng</button>
         </div>
       </div>
 
@@ -2027,7 +2167,7 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
             <h2 className="font-bold text-slate-800 text-sm mb-3">Tạo Khoản Thu / Quỹ Lớp Mới</h2>
             <form onSubmit={handleAddFeeItem} className="grid grid-cols-1 md:grid-cols-4 gap-3">
               <input type="text" required placeholder="Tên khoản thu" value={feeTitle} onChange={e => setFeeTitle(e.target.value)} className="p-2 border rounded-xl" />
-              <input type="number" required placeholder="Số tiền (VNĐ)" value={feeAmount} onChange={e => setFeeAmount(e.target.value)} className="p-2 border rounded-xl" />
+              <input type="number" required min="0" placeholder="Số tiền (VNĐ)" value={feeAmount} onChange={e => setFeeAmount(e.target.value)} className="p-2 border rounded-xl" />
               <input type="date" value={feeDeadline} onChange={e => setFeeDeadline(e.target.value)} className="p-2 border rounded-xl" />
               <button type="submit" className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow">Tạo Khoản Thu</button>
             </form>
@@ -2193,6 +2333,14 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
               <p className="text-slate-400 italic">Chọn 1 khoản thu ở trên để xem và cập nhật trạng thái từng học sinh.</p>
             )}
           </div>
+        </div>
+      )}
+
+      {/* Tab Điểm miệng: chỉ tải lần đầu khi mở, sau đó GIỮ NGUYÊN (ẩn đi) khi chuyển tab khác
+          để không mất điểm đang nhập dở chưa lưu. */}
+      {oralTabOpened && (
+        <div className={activeTab === 'oral' ? '' : 'hidden'}>
+          <OralScoresTab teacher={teacher} />
         </div>
       )}
 
@@ -2379,6 +2527,887 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
             </form>
           </div>
         </div>
+      )}
+    </div>
+  );
+}
+
+// ==================== 5b. ĐIỂM KIỂM TRA MIỆNG (CÁC LỚP GIẢNG DẠY) ====================
+// Dữ liệu lưu ở 3 bảng Supabase: oral_classes, oral_students, oral_entries
+// (tạo bằng file SQL "03_cap_nhat_diem_mieng_va_bao_mat.sql"). Danh sách học sinh ở đây ĐỘC LẬP với
+// danh sách lớp chủ nhiệm, vì GV bộ môn dạy nhiều lớp khác nhau.
+interface OralClass {
+  id: string;
+  teacher_id: string;
+  name: string;
+  school_year: string;
+  semester: number;
+  calc_method: 'average' | 'max';
+  apply_mode: 'next' | 'previous';
+  created_at?: string;
+}
+
+interface OralStudent {
+  id: string;
+  class_id: string;
+  teacher_id: string;
+  order_no: number;
+  student_key: string;
+  code: string;
+  full_name: string;
+  dob?: string | null;
+}
+
+interface OralEntry {
+  id: string;
+  class_id: string;
+  student_id: string;
+  teacher_id: string;
+  entry_date: string;
+  score: number | null;
+  plus_points: number;
+  minus_points: number;
+  note: string;
+}
+
+interface OralDraftRow { score: string; plus: string; minus: string; note: string; }
+interface ParsedOralStudent { order_no: number; code: string; full_name: string; dob: string | null; student_key: string; }
+
+const EMPTY_ORAL_DRAFT: OralDraftRow = { score: '', plus: '', minus: '', note: '' };
+
+const defaultSchoolYear = (): string => {
+  const d = new Date();
+  const y = d.getFullYear();
+  return d.getMonth() + 1 >= 8 ? `${y}-${y + 1}` : `${y - 1}-${y}`;
+};
+const defaultSemester = (): number => {
+  const m = new Date().getMonth() + 1;
+  return m >= 8 || m === 1 ? 1 : 2;
+};
+
+// Điểm miệng: để trống = không kiểm tra; cho phép dấu phẩy (7,5); tối đa 2 chữ số thập phân; 0 ≤ điểm ≤ 10.
+const parseOralScore = (s: string): { ok: boolean; value: number | null } => {
+  const t = s.trim().replace(',', '.');
+  if (t === '') return { ok: true, value: null };
+  if (!/^\d{1,2}(\.\d{1,2})?$/.test(t)) return { ok: false, value: null };
+  const v = Number(t);
+  return v >= 0 && v <= 10 ? { ok: true, value: v } : { ok: false, value: null };
+};
+// Số điểm cộng / trừ trong 1 ngày: số nguyên 0–100, để trống = 0.
+const parseOralCount = (s: string): { ok: boolean; value: number } => {
+  const t = s.trim();
+  if (t === '') return { ok: true, value: 0 };
+  if (!/^\d{1,3}$/.test(t)) return { ok: false, value: 0 };
+  const v = Number(t);
+  return v <= 100 ? { ok: true, value: v } : { ok: false, value: 0 };
+};
+
+const makeOralStudentKey = (code: string, fullName: string, dob: string | null): string =>
+  code ? `C:${code}` : `N:${toRoleKey(fullName)}|${dob || ''}`;
+
+// Đọc 1 sheet danh sách lớp. Tự dò dòng tiêu đề trong 20 dòng đầu (file xuất từ phần mềm của trường
+// thường có vài dòng tên trường/lớp phía trên). Nhận cả kiểu cột "Họ và tên" gộp hoặc "Họ đệm" + "Tên" tách rời.
+const parseOralStudentSheet = (ws: any, date1904: boolean): ParsedOralStudent[] => {
+  const rows: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: '' });
+  const NAME_KEYS = ['ho va ten', 'ho ten', 'ho va ten hoc sinh', 'ho ten hoc sinh', 'ten hoc sinh', 'hoten', 'hovaten'];
+  const LAST_KEYS = ['ho', 'ho dem', 'ho lot', 'ho va dem', 'ho va ten dem', 'ho va chu lot'];
+  const CODE_KEYS = ['mshs', 'ma hs', 'ma hoc sinh', 'ma so hoc sinh', 'ma so', 'ma dinh danh', 'ma'];
+  const STT_KEYS = ['stt', 'tt', 'so tt', 'so thu tu'];
+
+  for (let h = 0; h < Math.min(rows.length, 20); h++) {
+    const keys = (rows[h] || []).map((c: any) => toRoleKey(String(c ?? '')));
+    const nameIdx = keys.findIndex((k: string) => NAME_KEYS.includes(k));
+    const lastIdx = keys.findIndex((k: string) => LAST_KEYS.includes(k));
+    const firstIdx = keys.findIndex((k: string) => k === 'ten');
+    if (nameIdx < 0 && !(lastIdx >= 0 && firstIdx >= 0)) continue;
+
+    const codeIdx = keys.findIndex((k: string) => CODE_KEYS.includes(k));
+    const dobIdx = keys.findIndex((k: string) => k.startsWith('ngay sinh') || k === 'ns' || k === 'dob');
+    const sttIdx = keys.findIndex((k: string) => STT_KEYS.includes(k));
+
+    const result: ParsedOralStudent[] = [];
+    const usedKeys = new Map<string, number>();
+    for (let r = h + 1; r < rows.length; r++) {
+      const row = rows[r] || [];
+      const rawName = nameIdx >= 0
+        ? String(row[nameIdx] ?? '')
+        : `${String(row[lastIdx] ?? '')} ${String(row[firstIdx] ?? '')}`;
+      const fullName = rawName.normalize('NFC').replace(/\s+/g, ' ').trim();
+      const nameKey = toRoleKey(fullName);
+      // Bỏ dòng trống, dòng số thuần, dòng tiêu đề lặp lại, dòng tổng kết cuối bảng.
+      if (!fullName || /^[\d\s.,]+$/.test(fullName) || NAME_KEYS.includes(nameKey) || nameKey.startsWith('tong')) continue;
+
+      const code = codeIdx >= 0 ? String(row[codeIdx] ?? '').normalize('NFC').trim().toUpperCase() : '';
+      const dob = dobIdx >= 0 ? excelDateToISO(row[dobIdx], date1904) : null;
+      const sttNum = sttIdx >= 0 ? Number(row[sttIdx]) : NaN;
+      const orderNo = Number.isFinite(sttNum) && sttNum > 0 ? Math.floor(sttNum) : result.length + 1;
+
+      // Trùng khóa trong cùng file (VD 2 bạn trùng họ tên, không có MSHS/ngày sinh) → thêm hậu tố
+      // để không bị lỗi "ON CONFLICT ... cannot affect row a second time" khi lưu.
+      let key = makeOralStudentKey(code, fullName, dob);
+      const seen = usedKeys.get(key) || 0;
+      usedKeys.set(key, seen + 1);
+      if (seen > 0) key = `${key}#${seen + 1}`;
+
+      result.push({ order_no: orderNo, code, full_name: fullName, dob, student_key: key });
+    }
+    return result;
+  }
+  return [];
+};
+
+function OralScoresTab({ teacher }: { teacher: Teacher }) {
+  const [classes, setClasses] = useState<OralClass[]>([]);
+  const [selectedClassId, setSelectedClassId] = useState<string>('');
+  const [oralStudents, setOralStudents] = useState<OralStudent[]>([]);
+  const [entries, setEntries] = useState<OralEntry[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [importing, setImporting] = useState(false);
+
+  const [showCreate, setShowCreate] = useState(false);
+  const [newClass, setNewClass] = useState({
+    name: '', school_year: defaultSchoolYear(), semester: defaultSemester(),
+    calc_method: 'average' as 'average' | 'max', apply_mode: 'next' as 'next' | 'previous',
+  });
+
+  const [view, setView] = useState<'entry' | 'summary'>('entry');
+  const [entryDate, setEntryDate] = useState<string>(todayLocalISO());
+  const [draft, setDraft] = useState<Record<string, OralDraftRow>>({});
+  const [dirty, setDirty] = useState(false);
+
+  const [newStu, setNewStu] = useState({ full_name: '', code: '', dob: '' });
+
+  const singleFileRef = useRef<HTMLInputElement>(null);
+  const multiFileRef = useRef<HTMLInputElement>(null);
+
+  const selectedClass = classes.find(c => c.id === selectedClassId) || null;
+
+  useEffect(() => {
+    fetchClasses();
+  }, [teacher.id]);
+
+  useEffect(() => {
+    if (selectedClassId) fetchClassData(selectedClassId);
+    else { setOralStudents([]); setEntries([]); setDraft({}); setDirty(false); }
+  }, [selectedClassId]);
+
+  // Cảnh báo khi đóng/tải lại trang mà còn điểm chưa lưu.
+  useEffect(() => {
+    if (!dirty) return;
+    const handler = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ''; };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [dirty]);
+
+  const buildDraft = (date: string, list: OralEntry[]): Record<string, OralDraftRow> => {
+    const d: Record<string, OralDraftRow> = {};
+    list.filter(e => e.entry_date === date).forEach(e => {
+      d[e.student_id] = {
+        score: e.score === null || e.score === undefined ? '' : String(e.score).replace('.', ','),
+        plus: e.plus_points ? String(e.plus_points) : '',
+        minus: e.minus_points ? String(e.minus_points) : '',
+        note: e.note || '',
+      };
+    });
+    return d;
+  };
+
+  const confirmDiscard = (): boolean =>
+    !dirty || window.confirm('Có điểm đã nhập nhưng CHƯA LƯU. Bỏ qua các thay đổi này?');
+
+  const fetchClasses = async (selectId?: string) => {
+    const { data, error } = await supabase
+      .from('oral_classes')
+      .select('*')
+      .eq('teacher_id', teacher.id)
+      .order('school_year', { ascending: false })
+      .order('semester', { ascending: false })
+      .order('name', { ascending: true });
+    if (error) {
+      alert('Lỗi tải danh sách lớp (đã chạy file SQL tạo bảng điểm miệng chưa?): ' + error.message);
+      return;
+    }
+    const list = (data || []) as OralClass[];
+    setClasses(list);
+    if (selectId) setSelectedClassId(selectId);
+    else if (selectedClassId && !list.some(c => c.id === selectedClassId)) setSelectedClassId('');
+  };
+
+  const fetchClassData = async (classId: string, keepDate = entryDate) => {
+    setLoading(true);
+    const [stRes, enRes] = await Promise.all([
+      supabase.from('oral_students').select('*').eq('class_id', classId)
+        .order('order_no', { ascending: true }).order('full_name', { ascending: true }),
+      supabase.from('oral_entries').select('*').eq('class_id', classId),
+    ]);
+    setLoading(false);
+    if (stRes.error || enRes.error) {
+      alert('Lỗi tải dữ liệu lớp: ' + (stRes.error?.message || enRes.error?.message));
+      return;
+    }
+    const st = (stRes.data || []) as OralStudent[];
+    const en = ((enRes.data || []) as any[]).map(e => ({
+      ...e,
+      score: e.score === null || e.score === undefined ? null : Number(e.score), // numeric → có thể về dạng chuỗi
+      plus_points: Number(e.plus_points) || 0,
+      minus_points: Number(e.minus_points) || 0,
+      note: e.note || '',
+    })) as OralEntry[];
+    setOralStudents(st);
+    setEntries(en);
+    setDraft(buildDraft(keepDate, en));
+    setDirty(false);
+  };
+
+  const handleSelectClass = (id: string) => {
+    if (id === selectedClassId) return;
+    if (!confirmDiscard()) return;
+    setDirty(false);
+    setSelectedClassId(id);
+  };
+
+  const handleChangeDate = (date: string) => {
+    if (!date || date === entryDate) return;
+    if (!confirmDiscard()) return;
+    setEntryDate(date);
+    setDraft(buildDraft(date, entries));
+    setDirty(false);
+  };
+
+  // ---------- LỚP ----------
+  const handleCreateClass = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const name = newClass.name.normalize('NFC').replace(/\s+/g, ' ').trim().toUpperCase();
+    const year = newClass.school_year.trim();
+    if (!name) { alert('Vui lòng nhập tên lớp.'); return; }
+    if (!/^\d{4}-\d{4}$/.test(year) || Number(year.slice(5)) !== Number(year.slice(0, 4)) + 1) {
+      alert('Năm học phải có dạng 2026-2027.');
+      return;
+    }
+    if (classes.some(c => c.name === name && c.school_year === year && c.semester === newClass.semester)) {
+      alert(`Lớp ${name} (HK${newClass.semester}, ${year}) đã có rồi.`);
+      return;
+    }
+    if (!confirmDiscard()) return;
+    const { data, error } = await supabase.from('oral_classes').insert([{
+      teacher_id: teacher.id, name, school_year: year, semester: newClass.semester,
+      calc_method: newClass.calc_method, apply_mode: newClass.apply_mode,
+    }]).select().single();
+    if (error) { alert('Lỗi tạo lớp: ' + error.message); return; }
+    setNewClass({ ...newClass, name: '' });
+    setShowCreate(false);
+    setDirty(false);
+    fetchClasses((data as OralClass).id);
+  };
+
+  const handleUpdateClassSetting = async (patch: Partial<Pick<OralClass, 'calc_method' | 'apply_mode'>>) => {
+    if (!selectedClass) return;
+    const { error } = await supabase.from('oral_classes').update(patch).eq('id', selectedClass.id);
+    if (error) { alert('Lỗi lưu cài đặt: ' + error.message); return; }
+    setClasses(prev => prev.map(c => (c.id === selectedClass.id ? { ...c, ...patch } : c)));
+  };
+
+  const handleDeleteClass = async () => {
+    if (!selectedClass) return;
+    const typed = window.prompt(
+      `XÓA lớp ${selectedClass.name} (HK${selectedClass.semester}, ${selectedClass.school_year}) sẽ xóa luôn toàn bộ học sinh và điểm miệng của lớp, KHÔNG khôi phục được.\n\nGõ đúng tên lớp "${selectedClass.name}" để xác nhận:`
+    );
+    if (typed === null) return;
+    if (typed.trim().toUpperCase() !== selectedClass.name) { alert('Tên lớp không khớp, đã hủy xóa.'); return; }
+    const { error } = await supabase.from('oral_classes').delete().eq('id', selectedClass.id);
+    if (error) { alert('Lỗi xóa lớp: ' + error.message); return; }
+    setDirty(false);
+    setSelectedClassId('');
+    fetchClasses();
+  };
+
+  // ---------- HỌC SINH ----------
+  // Đồng bộ danh sách đọc từ Excel vào 1 lớp: khớp theo MSHS (hoặc Họ tên + Ngày sinh nếu không có MSHS).
+  // Học sinh đã có → cập nhật (GIỮ NGUYÊN điểm đã nhập); học sinh mới → thêm; học sinh không có trong file → giữ nguyên.
+  const syncStudentsToClass = async (classId: string, rows: ParsedOralStudent[]) => {
+    const { data: exData, error: exErr } = await supabase.from('oral_students').select('*').eq('class_id', classId);
+    if (exErr) throw exErr;
+    const existing = (exData || []) as OralStudent[];
+    const usedIds = new Set<string>();
+    const updates: any[] = [];
+    const inserts: any[] = [];
+
+    for (const r of rows) {
+      let match = existing.find(s => !usedIds.has(s.id) && s.student_key === r.student_key);
+      if (!match) {
+        match = existing.find(s =>
+          !usedIds.has(s.id) &&
+          toRoleKey(s.full_name) === toRoleKey(r.full_name) &&
+          (r.code ? (!s.code || s.code === r.code) : true) &&
+          (s.dob || '') === (r.dob || '')
+        );
+      }
+      const payload = {
+        class_id: classId, teacher_id: teacher.id, order_no: r.order_no,
+        code: r.code, full_name: r.full_name, dob: r.dob, student_key: r.student_key,
+      };
+      if (match) {
+        usedIds.add(match.id);
+        updates.push({ id: match.id, ...payload });
+      } else {
+        inserts.push(payload);
+      }
+    }
+
+    if (updates.length) {
+      const { error } = await supabase.from('oral_students').upsert(updates, { onConflict: 'id' });
+      if (error) throw error;
+    }
+    if (inserts.length) {
+      const { error } = await supabase.from('oral_students').insert(inserts);
+      if (error) throw error;
+    }
+    return { added: inserts.length, updated: updates.length, untouched: existing.length - usedIds.size };
+  };
+
+  const readWorkbook = async (file: File) => {
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(new Uint8Array(buf), { type: 'array' });
+    const date1904 = !!(wb as any).Workbook?.WBProps?.date1904;
+    return wb.SheetNames
+      .map((name: string) => ({ name: name.trim(), rows: parseOralStudentSheet(wb.Sheets[name], date1904) }))
+      .filter((s: { rows: ParsedOralStudent[] }) => s.rows.length > 0);
+  };
+
+  const NO_DATA_MSG = 'Không đọc được danh sách học sinh. File cần có dòng tiêu đề chứa cột "Họ và tên" (hoặc 2 cột "Họ đệm" + "Tên"); các cột "MSHS", "Ngày sinh", "STT" là tùy chọn.';
+
+  // Nhập 1 file vào LỚP ĐANG CHỌN (lấy sheet đầu tiên có dữ liệu).
+  const handleImportSingle = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !selectedClass) return;
+    if (!confirmDiscard()) { if (singleFileRef.current) singleFileRef.current.value = ''; return; }
+    setImporting(true);
+    try {
+      const sheets = await readWorkbook(file);
+      if (sheets.length === 0) { alert(NO_DATA_MSG); return; }
+      const sheet = sheets[0];
+      if (sheets.length > 1 && !window.confirm(
+        `File có ${sheets.length} sheet chứa danh sách. Chỉ nhập sheet đầu tiên "${sheet.name}" (${sheet.rows.length} HS) vào lớp ${selectedClass.name}.\n` +
+        `(Muốn mỗi sheet thành 1 lớp riêng, hãy dùng nút "Nhập file nhiều lớp".)\n\nTiếp tục?`
+      )) return;
+      const res = await syncStudentsToClass(selectedClass.id, sheet.rows);
+      alert(
+        `Lớp ${selectedClass.name}: thêm mới ${res.added} HS, cập nhật ${res.updated} HS.` +
+        (res.untouched > 0 ? `\nCó ${res.untouched} HS đang có trong lớp nhưng không có trong file — vẫn được giữ nguyên (xóa thủ công nếu cần).` : '')
+      );
+      fetchClassData(selectedClass.id);
+    } catch (err: any) {
+      alert('Lỗi nhập file Excel: ' + (err?.message || err));
+    } finally {
+      setImporting(false);
+      if (singleFileRef.current) singleFileRef.current.value = '';
+    }
+  };
+
+  // Nhập 1 file có NHIỀU SHEET: mỗi sheet = 1 lớp (tên sheet = tên lớp), dùng Năm học/HK/Cách tính ở form "Tạo lớp".
+  const handleImportMulti = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!confirmDiscard()) { if (multiFileRef.current) multiFileRef.current.value = ''; return; }
+    const year = newClass.school_year.trim();
+    if (!/^\d{4}-\d{4}$/.test(year)) {
+      alert('Vui lòng nhập Năm học hợp lệ (VD 2026-2027) ở khung "Tạo lớp mới" trước khi nhập file nhiều lớp.');
+      if (multiFileRef.current) multiFileRef.current.value = '';
+      return;
+    }
+    setImporting(true);
+    try {
+      const sheets = await readWorkbook(file);
+      if (sheets.length === 0) { alert(NO_DATA_MSG); return; }
+      const names = sheets.map((s: { name: string }) => s.name.normalize('NFC').replace(/\s+/g, ' ').trim().toUpperCase());
+      const dupName = names.find((n: string, i: number) => names.indexOf(n) !== i);
+      if (dupName) { alert(`Có 2 sheet cùng tên lớp "${dupName}". Vui lòng đổi tên sheet cho khác nhau.`); return; }
+      if (!window.confirm(
+        `Sẽ nhập ${sheets.length} lớp (HK${newClass.semester}, năm học ${year}):\n` +
+        sheets.map((s: { rows: ParsedOralStudent[] }, i: number) => `• ${names[i]}: ${s.rows.length} HS`).join('\n') +
+        `\n\nLớp đã có (trùng tên, năm học, học kì) sẽ được cập nhật danh sách, điểm cũ giữ nguyên. Tiếp tục?`
+      )) return;
+
+      const report: string[] = [];
+      let lastClassId = '';
+      for (let i = 0; i < sheets.length; i++) {
+        const name = names[i];
+        let cls = classes.find(c => c.name === name && c.school_year === year && c.semester === newClass.semester);
+        if (!cls) {
+          const { data, error } = await supabase.from('oral_classes').insert([{
+            teacher_id: teacher.id, name, school_year: year, semester: newClass.semester,
+            calc_method: newClass.calc_method, apply_mode: newClass.apply_mode,
+          }]).select().single();
+          if (error) { report.push(`• ${name}: LỖI tạo lớp — ${error.message}`); continue; }
+          cls = data as OralClass;
+        }
+        try {
+          const res = await syncStudentsToClass(cls.id, sheets[i].rows);
+          report.push(`• ${name}: +${res.added} mới, ${res.updated} cập nhật`);
+          lastClassId = cls.id;
+        } catch (err: any) {
+          report.push(`• ${name}: LỖI — ${err?.message || err}`);
+        }
+      }
+      alert('Kết quả nhập file nhiều lớp:\n' + report.join('\n'));
+      setDirty(false);
+      await fetchClasses(lastClassId || undefined);
+      if (lastClassId && lastClassId === selectedClassId) fetchClassData(lastClassId);
+    } catch (err: any) {
+      alert('Lỗi nhập file Excel: ' + (err?.message || err));
+    } finally {
+      setImporting(false);
+      if (multiFileRef.current) multiFileRef.current.value = '';
+    }
+  };
+
+  const handleAddStudent = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedClass) return;
+    const fullName = newStu.full_name.normalize('NFC').replace(/\s+/g, ' ').trim();
+    const code = newStu.code.trim().toUpperCase();
+    const dob = newStu.dob || null;
+    if (!fullName) { alert('Vui lòng nhập họ tên học sinh.'); return; }
+    const key = makeOralStudentKey(code, fullName, dob);
+    if (oralStudents.some(s => s.student_key === key)) {
+      alert('Học sinh này đã có trong lớp (trùng MSHS, hoặc trùng Họ tên + Ngày sinh).');
+      return;
+    }
+    const maxOrder = oralStudents.reduce((m, s) => Math.max(m, s.order_no || 0), 0);
+    const { error } = await supabase.from('oral_students').insert([{
+      class_id: selectedClass.id, teacher_id: teacher.id, order_no: maxOrder + 1,
+      code, full_name: fullName, dob, student_key: key,
+    }]);
+    if (error) { alert('Lỗi thêm học sinh: ' + error.message); return; }
+    setNewStu({ full_name: '', code: '', dob: '' });
+    // Giữ nguyên điểm đang nhập dở trên màn hình: chỉ tải lại danh sách học sinh.
+    const { data } = await supabase.from('oral_students').select('*').eq('class_id', selectedClass.id)
+      .order('order_no', { ascending: true }).order('full_name', { ascending: true });
+    if (data) setOralStudents(data as OralStudent[]);
+  };
+
+  const handleDeleteStudent = async (s: OralStudent) => {
+    const count = entries.filter(e => e.student_id === s.id).length;
+    if (!window.confirm(`Xóa ${s.full_name} khỏi lớp?` + (count ? `\nToàn bộ ${count} lần nhập điểm của em này cũng sẽ bị xóa.` : ''))) return;
+    const { error } = await supabase.from('oral_students').delete().eq('id', s.id);
+    if (error) { alert('Lỗi xóa học sinh: ' + error.message); return; }
+    setOralStudents(prev => prev.filter(x => x.id !== s.id));
+    setEntries(prev => prev.filter(x => x.student_id !== s.id));
+    setDraft(prev => { const n = { ...prev }; delete n[s.id]; return n; });
+  };
+
+  // ---------- NHẬP ĐIỂM THEO NGÀY ----------
+  const updateDraft = (studentId: string, field: keyof OralDraftRow, value: string) => {
+    setDraft(prev => ({ ...prev, [studentId]: { ...(prev[studentId] || EMPTY_ORAL_DRAFT), [field]: value } }));
+    setDirty(true);
+  };
+
+  const stepCount = (studentId: string, field: 'plus' | 'minus', delta: number) => {
+    const cur = parseOralCount((draft[studentId] || EMPTY_ORAL_DRAFT)[field]);
+    const next = Math.min(100, Math.max(0, (cur.ok ? cur.value : 0) + delta));
+    updateDraft(studentId, field, next === 0 ? '' : String(next));
+  };
+
+  const handleSaveDay = async () => {
+    if (!selectedClass) return;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(entryDate)) { alert('Vui lòng chọn ngày nhập điểm.'); return; }
+    const errors: string[] = [];
+    const upserts: any[] = [];
+    const deleteIds: string[] = [];
+
+    for (const s of oralStudents) {
+      const d = draft[s.id] || EMPTY_ORAL_DRAFT;
+      const existing = entries.find(e => e.student_id === s.id && e.entry_date === entryDate);
+      const sc = parseOralScore(d.score);
+      const pl = parseOralCount(d.plus);
+      const mi = parseOralCount(d.minus);
+      if (!sc.ok) errors.push(`${s.full_name}: điểm miệng "${d.score}" không hợp lệ (0 – 10)`);
+      if (!pl.ok) errors.push(`${s.full_name}: điểm cộng "${d.plus}" phải là số nguyên 0 – 100`);
+      if (!mi.ok) errors.push(`${s.full_name}: điểm trừ "${d.minus}" phải là số nguyên 0 – 100`);
+      if (!sc.ok || !pl.ok || !mi.ok) continue;
+      const note = d.note.trim();
+      if (sc.value === null && pl.value === 0 && mi.value === 0 && !note) {
+        if (existing) deleteIds.push(existing.id); // GV xóa trắng ô → xóa bản ghi ngày đó
+        continue;
+      }
+      upserts.push({
+        class_id: selectedClass.id, student_id: s.id, teacher_id: teacher.id, entry_date: entryDate,
+        score: sc.value, plus_points: pl.value, minus_points: mi.value, note,
+        updated_at: new Date().toISOString(),
+      });
+    }
+
+    if (errors.length) {
+      alert('Chưa lưu được, vui lòng sửa các ô sau:\n' + errors.slice(0, 12).join('\n') + (errors.length > 12 ? `\n... và ${errors.length - 12} lỗi khác` : ''));
+      return;
+    }
+    if (!upserts.length && !deleteIds.length) { alert('Ngày này chưa có điểm nào để lưu.'); return; }
+
+    setSaving(true);
+    try {
+      if (upserts.length) {
+        const { error } = await supabase.from('oral_entries').upsert(upserts, { onConflict: 'student_id,entry_date' });
+        if (error) throw error;
+      }
+      if (deleteIds.length) {
+        const { error } = await supabase.from('oral_entries').delete().in('id', deleteIds);
+        if (error) throw error;
+      }
+      setDirty(false);
+      await fetchClassData(selectedClass.id, entryDate);
+      alert(`Đã lưu điểm ngày ${formatDateVN(entryDate)}: ${upserts.length} học sinh` + (deleteIds.length ? `, xóa ${deleteIds.length} ô để trống.` : '.'));
+    } catch (err: any) {
+      alert('Lỗi lưu điểm: ' + (err?.message || err));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // ---------- TỔNG KẾT ----------
+  const summaries: Record<string, OralSummary> = {};
+  if (selectedClass) {
+    oralStudents.forEach(s => {
+      summaries[s.id] = computeOralSummary(
+        entries.filter(e => e.student_id === s.id),
+        selectedClass.calc_method,
+        selectedClass.apply_mode || 'next'
+      );
+    });
+  }
+  const datesWithData = Array.from(new Set(entries.map(e => e.entry_date))).sort((a, b) => b.localeCompare(a));
+  const isFutureDate = entryDate > todayLocalISO();
+
+  const handleExport = () => {
+    if (!selectedClass) return;
+    const methodLabel = selectedClass.calc_method === 'max' ? 'Điểm cao nhất' : 'Trung bình cộng';
+    const sheet1 = oralStudents.map((s, i) => {
+      const sm = summaries[s.id];
+      return {
+        'STT': s.order_no || i + 1,
+        'MSHS': s.code || '',
+        'Họ và tên': s.full_name,
+        'Ngày sinh': formatDateVN(s.dob),
+        'Số lần KT': sm.tests.length,
+        'Các lần KT (gốc → sau quy đổi)': sm.tests.map(t =>
+          `${formatDateVN(t.date)}: ${formatScore(t.raw)}${t.adjusted !== t.raw || t.bonus || t.penalty ? ` → ${formatScore(t.adjusted)}` : ''}`
+        ).join('; '),
+        'Tổng điểm cộng': sm.totalPlus,
+        'Tổng điểm trừ': sm.totalMinus,
+        'Cộng còn dư': sm.plusLeft,
+        'Trừ còn dư': sm.minusLeft,
+        'Trung bình cộng': sm.average ?? '',
+        'Điểm cao nhất': sm.max ?? '',
+        [`Kết quả HK (${methodLabel})`]: sm.final ?? '',
+      };
+    });
+    const nameById = new Map(oralStudents.map(s => [s.id, s.full_name]));
+    const sheet2 = [...entries]
+      .sort((a, b) => a.entry_date.localeCompare(b.entry_date) || (nameById.get(a.student_id) || '').localeCompare(nameById.get(b.student_id) || ''))
+      .map(e => ({
+        'Ngày': formatDateVN(e.entry_date),
+        'Họ và tên': nameById.get(e.student_id) || '',
+        'Điểm miệng': e.score ?? '',
+        'Điểm cộng': e.plus_points || 0,
+        'Điểm trừ': e.minus_points || 0,
+        'Ghi chú': e.note || '',
+      }));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(sheet1), 'TongKet');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(sheet2.length ? sheet2 : [{ 'Ngày': '', 'Họ và tên': '', 'Điểm miệng': '', 'Điểm cộng': '', 'Điểm trừ': '', 'Ghi chú': '' }]), 'NhatKyTheoNgay');
+    const safe = `DiemMieng_${selectedClass.name}_HK${selectedClass.semester}_${selectedClass.school_year}`.replace(/[\\/:*?"<>|\s]+/g, '_');
+    XLSX.writeFile(wb, `${safe}.xlsx`);
+  };
+
+  // ---------- GIAO DIỆN ----------
+  return (
+    <div className="space-y-6">
+      {/* CHỌN / TẠO LỚP */}
+      <div className="bg-white p-5 rounded-2xl border shadow-sm space-y-4">
+        <div className="flex flex-wrap items-end gap-3 justify-between">
+          <div className="flex-1 min-w-[240px]">
+            <label className="font-bold text-slate-700 block mb-1">📝 Lớp giảng dạy:</label>
+            <select value={selectedClassId} onChange={e => handleSelectClass(e.target.value)} className="w-full p-2 border rounded-xl bg-white">
+              <option value="">-- Chọn lớp --</option>
+              {classes.map(c => (
+                <option key={c.id} value={c.id}>{c.name} — HK{c.semester} ({c.school_year})</option>
+              ))}
+            </select>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" onClick={() => setShowCreate(!showCreate)} className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-3 py-2 rounded-xl shadow flex items-center gap-1">
+              <PlusCircle className="w-4 h-4" /> {showCreate ? 'Đóng' : 'Tạo lớp mới'}
+            </button>
+            <button type="button" disabled={importing} onClick={() => multiFileRef.current?.click()} className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white font-bold px-3 py-2 rounded-xl shadow flex items-center gap-1">
+              <FileText className="w-4 h-4" /> {importing ? 'Đang nhập...' : 'Nhập file nhiều lớp'}
+            </button>
+            <input ref={multiFileRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleImportMulti} />
+          </div>
+        </div>
+
+        {showCreate && (
+          <form onSubmit={handleCreateClass} className="p-4 border rounded-xl bg-slate-50 grid grid-cols-1 md:grid-cols-6 gap-3 items-end">
+            <div>
+              <label className="font-semibold block mb-1">Tên lớp (*):</label>
+              <input type="text" value={newClass.name} onChange={e => setNewClass({ ...newClass, name: e.target.value })} placeholder="VD: 12A1" className="w-full p-2 border rounded-xl uppercase" />
+            </div>
+            <div>
+              <label className="font-semibold block mb-1">Năm học:</label>
+              <input type="text" value={newClass.school_year} onChange={e => setNewClass({ ...newClass, school_year: e.target.value })} placeholder="2026-2027" className="w-full p-2 border rounded-xl font-mono" />
+            </div>
+            <div>
+              <label className="font-semibold block mb-1">Học kì:</label>
+              <select value={newClass.semester} onChange={e => setNewClass({ ...newClass, semester: Number(e.target.value) })} className="w-full p-2 border rounded-xl bg-white">
+                <option value={1}>Học kì 1</option>
+                <option value={2}>Học kì 2</option>
+              </select>
+            </div>
+            <div>
+              <label className="font-semibold block mb-1">Cách tính cuối kì:</label>
+              <select value={newClass.calc_method} onChange={e => setNewClass({ ...newClass, calc_method: e.target.value as 'average' | 'max' })} className="w-full p-2 border rounded-xl bg-white">
+                <option value="average">Trung bình cộng</option>
+                <option value="max">Lấy điểm cao nhất</option>
+              </select>
+            </div>
+            <div>
+              <label className="font-semibold block mb-1">Áp điểm quy đổi vào:</label>
+              <select value={newClass.apply_mode} onChange={e => setNewClass({ ...newClass, apply_mode: e.target.value as 'next' | 'previous' })} className="w-full p-2 border rounded-xl bg-white">
+                <option value="next">Lần KT kế tiếp</option>
+                <option value="previous">Lần KT gần nhất trước đó</option>
+              </select>
+            </div>
+            <button type="submit" className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow py-2">Tạo Lớp</button>
+            <p className="md:col-span-6 text-[11px] text-slate-500 italic">
+              * Nút "Nhập file nhiều lớp" dùng Năm học, Học kì và 2 cách tính ở khung này cho các lớp mới; mỗi sheet trong file Excel là 1 lớp, tên sheet là tên lớp.
+            </p>
+          </form>
+        )}
+
+        {classes.length === 0 && !showCreate && (
+          <p className="text-slate-400 italic">Chưa có lớp nào. Bấm "Tạo lớp mới" hoặc "Nhập file nhiều lớp" để bắt đầu.</p>
+        )}
+      </div>
+
+      {selectedClass && (
+        <>
+          {/* CÀI ĐẶT LỚP */}
+          <div className="bg-white p-5 rounded-2xl border shadow-sm space-y-3">
+            <div className="flex flex-wrap gap-3 items-end justify-between">
+              <div>
+                <h2 className="font-bold text-slate-800 text-sm">Lớp {selectedClass.name} — Học kì {selectedClass.semester}, năm học {selectedClass.school_year}</h2>
+                <p className="text-slate-500 text-[11px] mt-0.5">{oralStudents.length} học sinh · {datesWithData.length} ngày đã nhập điểm</p>
+              </div>
+              <div className="flex flex-wrap gap-2 items-end">
+                <div>
+                  <label className="font-semibold block mb-1">Kết quả cuối kì:</label>
+                  <select value={selectedClass.calc_method} onChange={e => handleUpdateClassSetting({ calc_method: e.target.value as 'average' | 'max' })} className="p-2 border rounded-xl bg-white">
+                    <option value="average">Trung bình cộng</option>
+                    <option value="max">Lấy điểm cao nhất</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="font-semibold block mb-1">Áp điểm quy đổi vào:</label>
+                  <select value={selectedClass.apply_mode || 'next'} onChange={e => handleUpdateClassSetting({ apply_mode: e.target.value as 'next' | 'previous' })} className="p-2 border rounded-xl bg-white">
+                    <option value="next">Lần KT kế tiếp</option>
+                    <option value="previous">Lần KT gần nhất trước đó</option>
+                  </select>
+                </div>
+                <button type="button" disabled={importing} onClick={() => singleFileRef.current?.click()} className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white font-bold px-3 py-2 rounded-xl shadow">
+                  {importing ? 'Đang nhập...' : '📥 Nhập DS từ Excel'}
+                </button>
+                <input ref={singleFileRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleImportSingle} />
+                <button type="button" onClick={handleExport} className="bg-slate-700 hover:bg-slate-800 text-white font-bold px-3 py-2 rounded-xl shadow">📤 Xuất Excel</button>
+                <button type="button" onClick={handleDeleteClass} className="bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100 font-bold px-3 py-2 rounded-xl">
+                  <Trash2 className="w-4 h-4 inline" /> Xóa lớp
+                </button>
+              </div>
+            </div>
+            <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-900 text-[11px] leading-relaxed">
+              <strong>Quy tắc:</strong> Điểm cộng và điểm trừ tính riêng — mỗi loại đủ <strong>10</strong> thì quy đổi thành <strong>±1 điểm chính</strong>, áp vào{' '}
+              {(selectedClass.apply_mode || 'next') === 'next' ? 'lần kiểm tra miệng kế tiếp (tính cả lần cùng ngày)' : 'lần kiểm tra miệng gần nhất trước đó'}; phần dư (dưới 10) được giữ lại để tích lũy tiếp.
+              Cuối kì còn đủ 10 thì áp vào lần kiểm tra gần nhất. Điểm mỗi lần luôn trong khoảng 0 – 10. Kết quả học kì làm tròn 1 chữ số thập phân.
+            </div>
+          </div>
+
+          {/* CHUYỂN CHẾ ĐỘ */}
+          <div className="flex gap-2">
+            <button type="button" onClick={() => setView('entry')} className={`px-4 py-2 rounded-xl font-bold ${view === 'entry' ? 'bg-indigo-600 text-white shadow' : 'bg-white border'}`}>✍️ Nhập điểm theo ngày</button>
+            <button type="button" onClick={() => setView('summary')} className={`px-4 py-2 rounded-xl font-bold ${view === 'summary' ? 'bg-indigo-600 text-white shadow' : 'bg-white border'}`}>📊 Tổng kết học kì</button>
+          </div>
+
+          {loading && <p className="text-slate-400 italic flex items-center gap-1"><RefreshCw className="w-3.5 h-3.5 animate-spin" /> Đang tải dữ liệu...</p>}
+
+          {view === 'entry' && !loading && (
+            <div className="bg-white rounded-2xl border shadow-sm">
+              <div className="p-4 border-b flex flex-wrap gap-3 items-end justify-between">
+                <div className="flex flex-wrap gap-3 items-end">
+                  <div>
+                    <label className="font-semibold block mb-1">Ngày nhập điểm:</label>
+                    <input type="date" value={entryDate} onChange={e => handleChangeDate(e.target.value)} className="p-2 border rounded-xl" />
+                  </div>
+                  {isFutureDate && <span className="text-[11px] text-amber-700 font-semibold">⚠️ Đang chọn ngày trong tương lai</span>}
+                  {dirty && <span className="text-[11px] text-rose-600 font-bold">● Có thay đổi chưa lưu</span>}
+                </div>
+                <button type="button" disabled={saving || oralStudents.length === 0} onClick={handleSaveDay} className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white font-bold px-5 py-2 rounded-xl shadow">
+                  {saving ? 'Đang lưu...' : `💾 Lưu điểm ngày ${formatDateVN(entryDate)}`}
+                </button>
+              </div>
+
+              {datesWithData.length > 0 && (
+                <div className="px-4 pt-3 flex flex-wrap gap-1.5 items-center">
+                  <span className="text-slate-500 font-semibold mr-1">Các ngày đã nhập:</span>
+                  {datesWithData.map(d => (
+                    <button key={d} type="button" onClick={() => handleChangeDate(d)} className={`px-2 py-0.5 rounded-full border text-[11px] font-mono ${d === entryDate ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-slate-50 hover:bg-indigo-50'}`}>
+                      {formatDateVN(d)}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              <div className="overflow-x-auto p-4">
+                <table className="w-full text-left border-collapse">
+                  <thead className="bg-slate-50 font-bold border-b text-slate-700">
+                    <tr>
+                      <th className="p-2 border-r w-10 text-center">STT</th>
+                      <th className="p-2 border-r">Họ và tên</th>
+                      <th className="p-2 border-r text-center w-24">Điểm miệng</th>
+                      <th className="p-2 border-r text-center">Điểm cộng</th>
+                      <th className="p-2 border-r text-center">Điểm trừ</th>
+                      <th className="p-2 border-r">Ghi chú</th>
+                      <th className="p-2 border-r text-center">Tích lũy (+/−)</th>
+                      <th className="p-2 text-center w-10"></th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {oralStudents.map((s, i) => {
+                      const d = draft[s.id] || EMPTY_ORAL_DRAFT;
+                      const scoreBad = !parseOralScore(d.score).ok;
+                      const plusBad = !parseOralCount(d.plus).ok;
+                      const minusBad = !parseOralCount(d.minus).ok;
+                      const sm = summaries[s.id];
+                      return (
+                        <tr key={s.id} className="hover:bg-slate-50">
+                          <td className="p-2 border-r text-center text-slate-500">{s.order_no || i + 1}</td>
+                          <td className="p-2 border-r font-semibold">
+                            {s.full_name}
+                            {s.code && <span className="ml-1 text-[10px] font-mono text-indigo-600">({s.code})</span>}
+                          </td>
+                          <td className="p-2 border-r">
+                            <input type="text" inputMode="decimal" value={d.score} onChange={e => updateDraft(s.id, 'score', e.target.value)} placeholder="—"
+                              className={`w-full p-1.5 border rounded-lg text-center font-bold ${scoreBad ? 'border-rose-500 bg-rose-50' : ''}`} />
+                          </td>
+                          <td className="p-2 border-r">
+                            <div className="flex items-center gap-1 justify-center">
+                              <button type="button" onClick={() => stepCount(s.id, 'plus', -1)} className="w-6 h-6 rounded bg-slate-100 hover:bg-slate-200 font-bold">−</button>
+                              <input type="text" inputMode="numeric" value={d.plus} onChange={e => updateDraft(s.id, 'plus', e.target.value)} placeholder="0"
+                                className={`w-12 p-1.5 border rounded-lg text-center text-emerald-700 font-bold ${plusBad ? 'border-rose-500 bg-rose-50' : ''}`} />
+                              <button type="button" onClick={() => stepCount(s.id, 'plus', 1)} className="w-6 h-6 rounded bg-emerald-100 hover:bg-emerald-200 text-emerald-800 font-bold">+</button>
+                            </div>
+                          </td>
+                          <td className="p-2 border-r">
+                            <div className="flex items-center gap-1 justify-center">
+                              <button type="button" onClick={() => stepCount(s.id, 'minus', -1)} className="w-6 h-6 rounded bg-slate-100 hover:bg-slate-200 font-bold">−</button>
+                              <input type="text" inputMode="numeric" value={d.minus} onChange={e => updateDraft(s.id, 'minus', e.target.value)} placeholder="0"
+                                className={`w-12 p-1.5 border rounded-lg text-center text-rose-700 font-bold ${minusBad ? 'border-rose-500 bg-rose-50' : ''}`} />
+                              <button type="button" onClick={() => stepCount(s.id, 'minus', 1)} className="w-6 h-6 rounded bg-rose-100 hover:bg-rose-200 text-rose-800 font-bold">+</button>
+                            </div>
+                          </td>
+                          <td className="p-2 border-r">
+                            <input type="text" value={d.note} onChange={e => updateDraft(s.id, 'note', e.target.value)} className="w-full p-1.5 border rounded-lg" />
+                          </td>
+                          <td className="p-2 border-r text-center text-[11px] whitespace-nowrap" title="Tính theo dữ liệu ĐÃ LƯU">
+                            <span className="text-emerald-700 font-bold">+{sm?.totalPlus ?? 0}</span> / <span className="text-rose-700 font-bold">−{sm?.totalMinus ?? 0}</span>
+                          </td>
+                          <td className="p-2 text-center">
+                            <button type="button" onClick={() => handleDeleteStudent(s)} className="text-slate-400 hover:text-rose-600" title="Xóa học sinh khỏi lớp">
+                              <Trash2 className="w-4 h-4 inline" />
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    {oralStudents.length === 0 && (
+                      <tr><td colSpan={8} className="p-4 text-center text-slate-400 italic">Lớp chưa có học sinh. Bấm "📥 Nhập DS từ Excel" hoặc thêm thủ công bên dưới.</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              <form onSubmit={handleAddStudent} className="p-4 border-t grid grid-cols-1 md:grid-cols-4 gap-3 items-end bg-slate-50 rounded-b-2xl">
+                <div>
+                  <label className="font-semibold block mb-1">Thêm HS — Họ và tên (*):</label>
+                  <input type="text" value={newStu.full_name} onChange={e => setNewStu({ ...newStu, full_name: e.target.value })} className="w-full p-2 border rounded-xl" />
+                </div>
+                <div>
+                  <label className="font-semibold block mb-1">MSHS (nếu có):</label>
+                  <input type="text" value={newStu.code} onChange={e => setNewStu({ ...newStu, code: e.target.value })} className="w-full p-2 border rounded-xl uppercase font-mono" />
+                </div>
+                <div>
+                  <label className="font-semibold block mb-1">Ngày sinh:</label>
+                  <input type="date" value={newStu.dob} onChange={e => setNewStu({ ...newStu, dob: e.target.value })} className="w-full p-2 border rounded-xl" />
+                </div>
+                <button type="submit" className="bg-slate-700 hover:bg-slate-800 text-white font-bold rounded-xl shadow py-2">+ Thêm học sinh</button>
+              </form>
+            </div>
+          )}
+
+          {view === 'summary' && !loading && (
+            <div className="bg-white rounded-2xl border shadow-sm overflow-x-auto p-4">
+              <table className="w-full text-left border-collapse">
+                <thead className="bg-slate-50 font-bold border-b text-slate-700">
+                  <tr>
+                    <th className="p-2 border-r text-center w-10">STT</th>
+                    <th className="p-2 border-r">Họ và tên</th>
+                    <th className="p-2 border-r">Các lần kiểm tra (gốc → sau quy đổi)</th>
+                    <th className="p-2 border-r text-center">Σ cộng / Σ trừ</th>
+                    <th className="p-2 border-r text-center">Còn dư</th>
+                    <th className={`p-2 border-r text-center ${selectedClass.calc_method === 'average' ? 'bg-indigo-100 text-indigo-900' : ''}`}>TB cộng</th>
+                    <th className={`p-2 border-r text-center ${selectedClass.calc_method === 'max' ? 'bg-indigo-100 text-indigo-900' : ''}`}>Cao nhất</th>
+                    <th className="p-2 text-center bg-indigo-600 text-white">Kết quả HK</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {oralStudents.map((s, i) => {
+                    const sm = summaries[s.id];
+                    return (
+                      <tr key={s.id} className="hover:bg-slate-50">
+                        <td className="p-2 border-r text-center text-slate-500">{s.order_no || i + 1}</td>
+                        <td className="p-2 border-r font-semibold">{s.full_name}</td>
+                        <td className="p-2 border-r">
+                          <div className="flex flex-wrap gap-1">
+                            {sm.tests.map((t, k) => {
+                              const changed = t.bonus > 0 || t.penalty > 0;
+                              return (
+                                <span key={k} title={`${formatDateVN(t.date)}: gốc ${formatScore(t.raw)}${t.bonus ? `, +${t.bonus}` : ''}${t.penalty ? `, −${t.penalty}` : ''} → ${formatScore(t.adjusted)}`}
+                                  className={`px-1.5 py-0.5 rounded font-mono text-[11px] border ${changed ? 'bg-amber-50 border-amber-300' : 'bg-slate-50'}`}>
+                                  {formatScore(t.raw)}{changed && <> → <strong>{formatScore(t.adjusted)}</strong></>}
+                                </span>
+                              );
+                            })}
+                            {sm.tests.length === 0 && <span className="text-slate-400 italic">Chưa có điểm</span>}
+                          </div>
+                        </td>
+                        <td className="p-2 border-r text-center whitespace-nowrap">
+                          <span className="text-emerald-700 font-bold">+{sm.totalPlus}</span> / <span className="text-rose-700 font-bold">−{sm.totalMinus}</span>
+                        </td>
+                        <td className="p-2 border-r text-center text-[11px] whitespace-nowrap">
+                          +{sm.plusLeft} / −{sm.minusLeft}
+                          {(sm.plusLeft >= ORAL_POINTS_PER_UNIT || sm.minusLeft >= ORAL_POINTS_PER_UNIT) && <span className="block text-amber-700">chờ lần KT đầu tiên</span>}
+                        </td>
+                        <td className={`p-2 border-r text-center font-bold ${selectedClass.calc_method === 'average' ? 'bg-indigo-50' : ''}`}>{formatScore(sm.average, true)}</td>
+                        <td className={`p-2 border-r text-center font-bold ${selectedClass.calc_method === 'max' ? 'bg-indigo-50' : ''}`}>{formatScore(sm.max, true)}</td>
+                        <td className="p-2 text-center font-black text-indigo-700 text-sm">{formatScore(sm.final, true)}</td>
+                      </tr>
+                    );
+                  })}
+                  {oralStudents.length === 0 && (
+                    <tr><td colSpan={8} className="p-4 text-center text-slate-400 italic">Lớp chưa có học sinh.</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
       )}
     </div>
   );

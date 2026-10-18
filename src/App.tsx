@@ -2,8 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import * as XLSX from 'xlsx';
 import {
   Users, Wallet, CheckCircle, XCircle, Trash2, Award, LogOut,
-  ShieldAlert, Trophy, Bell, AlertCircle, RefreshCw, BookOpen, FileText, PlusCircle,
-  Coins, Receipt
+  ShieldAlert, Trophy, Bell, AlertCircle, RefreshCw, BookOpen, FileText, PlusCircle
 } from 'lucide-react';
 import { supabase } from './supabaseClient';
 
@@ -37,7 +36,6 @@ interface FeeItem {
   title: string;
   amount: number;
   deadline?: string;
-  is_completed?: boolean;
 }
 
 interface FeePayment {
@@ -45,24 +43,6 @@ interface FeePayment {
   student_id: string;
   fee_item_id: string;
   is_paid: boolean;
-}
-
-interface FeeExpense {
-  id: string;
-  teacher_id: string;
-  title: string;
-  amount: number;
-  expense_date: string;
-  note?: string;
-}
-
-interface GroupWeeklyScore {
-  id: string;
-  teacher_id: string;
-  week_number: number;
-  group_number: number;
-  score: number;
-  note?: string;
 }
 
 interface Announcement {
@@ -86,258 +66,87 @@ interface StudentRecord {
   created_at?: string;
 }
 
-// ==================== ĐIỂM MIỆNG ====================
-// Cho phép GVCN quản lý điểm miệng của BẤT KỲ lớp nào mình dạy (không nhất
-// thiết là lớp chủ nhiệm) — mỗi lớp có 1 danh sách học sinh riêng, nhập từ
-// Excel, độc lập với bảng "students" (lớp chủ nhiệm) đã có.
-interface OralGradeClass {
-  id: string;
-  teacher_id: string;
-  class_name: string;
-  calc_method: 'average' | 'max';
-}
-
-interface OralGradeBonus {
-  id: string;
-  class_id: string;
-  student_id: string;
-  bonus_date: string;
-  points: number;
-  note?: string;
-}
-
-interface OralGradeStudent {
-  id: string;
-  class_id: string;
-  full_name: string;
-}
-
-interface OralGradeRecord {
-  id: string;
-  class_id: string;
-  student_id: string;
-  grade_date: string;
-  score: number;
-}
-
 type ViewType =
   | 'login' | 'forgot_password' | 'reset_password' | 'register_payment'
-  | 'admin' | 'teacher' | 'student_portal' | 'class_leader_portal' | 'treasurer_portal';
+  | 'admin' | 'teacher' | 'student_portal' | 'class_leader_portal';
 
 // ==================== BẢNG QUY ĐỊNH ĐIỂM THI ĐUA ====================
 // Đồng bộ với Bảng Nội Quy Thi Đua hiển thị cho học sinh (mục II và III trong StudentPortal).
 // Lớp trưởng sẽ CHỌN nội dung từ danh sách này, điểm sẽ tự động điền theo đúng quy định,
 // tránh trường hợp nhập tay sai lệch điểm so với nội quy lớp.
-// Mỗi mục có thêm "category" (lĩnh vực) để tự động gom nhóm hiển thị bảng
-// (gộp ô theo lĩnh vực) ở CẢ trang học sinh, trang GVCN, và file Word xuất
-// ra — chỉ cần sửa DUY NHẤT mảng này, mọi nơi hiển thị tự đồng bộ theo.
-interface CompetitionRule {
-  type: 'violation' | 'commendation';
-  category: string;
-  content: string;
-  points: number;
-}
-
-const COMPETITION_RULES: CompetitionRule[] = [
+const COMPETITION_RULES: { type: 'violation' | 'commendation'; content: string; points: number }[] = [
   // ==== II. BẢNG CỘNG ĐIỂM ====
-  { type: 'commendation', category: 'Kiểm tra / Thi', content: 'Đạt điểm 10 trong bài kiểm tra (Miệng, 15 phút, Giữa kỳ, Cuối kỳ)', points: 3 },
-  { type: 'commendation', category: 'Kiểm tra / Thi', content: 'Đạt điểm 9 trong bài kiểm tra (Miệng, 15 phút, Giữa kỳ, Cuối kỳ)', points: 2 },
-  { type: 'commendation', category: 'Thi Đấu / Phong Trào', content: 'Đạt giải Học sinh giỏi / KHKT / Thể thao cấp Trường (hoặc tương đương)', points: 5 },
-  { type: 'commendation', category: 'Thi Đấu / Phong Trào', content: 'Đạt giải Học sinh giỏi / KHKT cấp Tỉnh / Thành phố trở lên', points: 10 },
-  { type: 'commendation', category: 'Đóng Góp Tập Thể', content: 'Ban cán sự lớp (Lớp trưởng, Lớp phó, Cờ đỏ) hoàn thành xuất sắc nhiệm vụ', points: 5 },
-  { type: 'commendation', category: 'Đóng Góp Tập Thể', content: 'Nhặt được của rơi trả lại người mất / Hành động dũng cảm giúp đỡ cộng đồng', points: 5 },
+  { type: 'commendation', content: 'Đạt điểm 10 trong bài kiểm tra (Miệng, 15 phút, Giữa kỳ, Cuối kỳ)', points: 3 },
+  { type: 'commendation', content: 'Đạt điểm 9 trong bài kiểm tra (Miệng, 15 phút, Giữa kỳ, Cuối kỳ)', points: 2 },
+  { type: 'commendation', content: 'Đạt giải Học sinh giỏi / KHKT / Thể thao cấp Trường (hoặc tương đương)', points: 5 },
+  { type: 'commendation', content: 'Đạt giải Học sinh giỏi / KHKT cấp Tỉnh / Thành phố trở lên', points: 10 },
+  { type: 'commendation', content: 'Ban cán sự lớp (Lớp trưởng, Lớp phó, Cờ đỏ) hoàn thành xuất sắc nhiệm vụ', points: 5 },
+  { type: 'commendation', content: 'Nhặt được của rơi trả lại người mất / Hành động dũng cảm giúp đỡ cộng đồng', points: 5 },
   // ==== III. BẢNG TRỪ ĐIỂM HÀNG TUẦN ====
-  { type: 'violation', category: 'Chuyên Cần & Giờ Giấc', content: 'Đi học muộn (sau tiếng trống vào lớp / giờ truy bài)', points: 2 },
-  { type: 'violation', category: 'Chuyên Cần & Giờ Giấc', content: 'Bỏ giờ truy bài 15 phút đầu giờ', points: 3 },
-  { type: 'violation', category: 'Chuyên Cần & Giờ Giấc', content: 'Nghỉ học không lý do (nghỉ chui)', points: 10 },
-  { type: 'violation', category: 'Chuyên Cần & Giờ Giấc', content: 'Trốn tiết / Trốn học giữa giờ', points: 15 },
-  { type: 'violation', category: 'Nề Nếp Học Tập', content: 'Không làm bài tập về nhà / Không chuẩn bị bài theo yêu cầu GVBM', points: 3 },
-  { type: 'violation', category: 'Nề Nếp Học Tập', content: 'Không mang sách vở, dụng cụ học tập theo thời khóa biểu', points: 2 },
-  { type: 'violation', category: 'Nề Nếp Học Tập', content: 'Mất trật tự, làm việc riêng trong giờ học', points: 2 },
-  { type: 'violation', category: 'Nề Nếp Học Tập', content: 'Ngủ trong giờ học', points: 10 },
-  { type: 'violation', category: 'Nề Nếp Học Tập', content: 'Không viết bài / không soạn bài theo yêu cầu của giáo viên', points: 5 },
-  { type: 'violation', category: 'Nề Nếp Học Tập', content: 'Sử dụng điện thoại di động khi chưa có sự cho phép của giáo viên', points: 5 },
-  { type: 'violation', category: 'Nề Nếp Học Tập', content: 'Gian lận trong kiểm tra, thi cử (quay cóp, sử dụng tài liệu)', points: 20 },
-  { type: 'violation', category: 'Trang Phục & Rèn Luyện', content: 'Sai đồng phục, không đeo thẻ học sinh, đi dép lê không quai', points: 2 },
-  { type: 'violation', category: 'Trang Phục & Rèn Luyện', content: 'Nhuộm tóc màu sáng, nhuộm Highlight, nam để tóc quá dài', points: 5 },
-  { type: 'violation', category: 'Trang Phục & Rèn Luyện', content: 'Trang điểm đậm, sơn móng tay/móng chân màu nổi bật', points: 3 },
-  { type: 'violation', category: 'Trang Phục & Rèn Luyện', content: 'Hút thuốc lá, thuốc lá điện tử trong trường (hoặc vi phạm ATGT)', points: 20 },
-  { type: 'violation', category: 'Môi Trường & Văn Hóa', content: 'Bỏ trực nhật / Trực nhật sơ sài, không đổ rác đúng quy định', points: 5 },
-  { type: 'violation', category: 'Môi Trường & Văn Hóa', content: 'Xả rác bừa bãi trong lớp hoặc khuôn viên trường', points: 3 },
-  { type: 'violation', category: 'Môi Trường & Văn Hóa', content: 'Nói tục, chửi thề, gây mất đoàn kết nội bộ lớp', points: 5 },
-  { type: 'violation', category: 'Môi Trường & Văn Hóa', content: 'Mang đồ ăn, nước ngọt vào sử dụng trong giờ học', points: 2 },
+  { type: 'violation', content: 'Đi học muộn (sau tiếng trống vào lớp / giờ truy bài)', points: 2 },
+  { type: 'violation', content: 'Bỏ giờ truy bài 15 phút đầu giờ', points: 3 },
+  { type: 'violation', content: 'Nghỉ học không lý do (nghỉ chui)', points: 10 },
+  { type: 'violation', content: 'Trốn tiết / Trốn học giữa giờ', points: 15 },
+  { type: 'violation', content: 'Không làm bài tập về nhà / Không chuẩn bị bài theo yêu cầu GVBM', points: 3 },
+  { type: 'violation', content: 'Không mang sách vở, dụng cụ học tập theo thời khóa biểu', points: 2 },
+  { type: 'violation', content: 'Mất trật tự, làm việc riêng, ngủ gật trong giờ học', points: 2 },
+  { type: 'violation', content: 'Sử dụng điện thoại di động khi chưa có sự cho phép của giáo viên', points: 5 },
+  { type: 'violation', content: 'Gian lận trong kiểm tra, thi cử (quay cóp, sử dụng tài liệu)', points: 20 },
+  { type: 'violation', content: 'Sai đồng phục, không đeo thẻ học sinh, đi dép lê không quai', points: 2 },
+  { type: 'violation', content: 'Nhuộm tóc màu sáng, nhuộm Highlight, nam để tóc quá dài', points: 5 },
+  { type: 'violation', content: 'Trang điểm đậm, sơn móng tay/móng chân màu nổi bật', points: 3 },
+  { type: 'violation', content: 'Hút thuốc lá, thuốc lá điện tử trong trường (hoặc vi phạm ATGT)', points: 20 },
+  { type: 'violation', content: 'Bỏ trực nhật / Trực nhật sơ sài, không đổ rác đúng quy định', points: 5 },
+  { type: 'violation', content: 'Xả rác bừa bãi trong lớp hoặc khuôn viên trường', points: 3 },
+  { type: 'violation', content: 'Nói tục, chửi thề, gây mất đoàn kết nội bộ lớp', points: 5 },
+  { type: 'violation', content: 'Mang đồ ăn, nước ngọt vào sử dụng trong giờ học', points: 2 },
 ];
-
-// Gom các mục liên tiếp cùng "category" lại thành 1 nhóm (để hiển thị dạng
-// bảng có ô gộp theo lĩnh vực, giống cách trình bày cũ).
-function groupRulesByCategory(rows: CompetitionRule[]) {
-  const groups: { category: string; items: CompetitionRule[] }[] = [];
-  for (const r of rows) {
-    const last = groups[groups.length - 1];
-    if (last && last.category === r.category) {
-      last.items.push(r);
-    } else {
-      groups.push({ category: r.category, items: [r] });
-    }
-  }
-  return groups;
-}
-
-// ==================== BẢNG NỘI QUY THI ĐUA (DÙNG CHUNG) ====================
-// Component dùng chung cho CẢ trang học sinh và trang GVCN, để nội dung
-// luôn đồng bộ — sửa dữ liệu ở COMPETITION_RULES là tự cập nhật khắp nơi.
-function CompetitionRulesContent() {
-  const commendationGroups = groupRulesByCategory(COMPETITION_RULES.filter(r => r.type === 'commendation'));
-  const violationGroups = groupRulesByCategory(COMPETITION_RULES.filter(r => r.type === 'violation'));
-
-  return (
-    <div className="space-y-4 text-slate-700 leading-relaxed">
-      <h3 className="font-bold text-indigo-800 text-xs uppercase border-l-4 border-indigo-600 pl-2">I. Khung Xếp Loại Rèn Luyện Cuối Học Kỳ</h3>
-      <div className="overflow-x-auto">
-        <table className="w-full text-left border-collapse border border-slate-200">
-          <thead className="bg-indigo-50 font-bold text-indigo-900">
-            <tr>
-              <th className="p-2 border">Mức Điểm Tổng Kết</th>
-              <th className="p-2 border">Xếp Loại Hạnh Kiểm</th>
-              <th className="p-2 border">Tác Động & Hướng Xử Lý</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y">
-            <tr><td className="p-2 border font-bold">≥ 85 điểm</td><td className="p-2 border text-emerald-700 font-bold">TỐT</td><td className="p-2 border">Tuyên dương, đề xuất khen thưởng Học sinh Tốt/Xuất sắc cuối kỳ.</td></tr>
-            <tr><td className="p-2 border font-bold">60 – 84 điểm</td><td className="p-2 border text-blue-700 font-bold">KHÁ</td><td className="p-2 border">Đạt mức nếp sống văn minh; cần duy trì và phát huy.</td></tr>
-            <tr><td className="p-2 border font-bold">40 – 59 điểm</td><td className="p-2 border text-amber-700 font-bold">ĐẠT</td><td className="p-2 border">Đạt mức tối thiểu; GVCN nhắc nhở và gửi thông báo về gia đình.</td></tr>
-            <tr><td className="p-2 border font-bold">&lt; 40 điểm</td><td className="p-2 border text-rose-700 font-bold">CHƯA ĐẠT (YẾU)</td><td className="p-2 border">Tạm hoãn xét thi đua, mời phụ huynh họp trực tiếp và thực hiện Kế hoạch rèn luyện đặc biệt.</td></tr>
-          </tbody>
-        </table>
-      </div>
-
-      <h3 className="font-bold text-indigo-800 text-xs uppercase border-l-4 border-indigo-600 pl-2">II. Bảng Cộng Điểm (Chỉ Cộng Điểm 9 & 10)</h3>
-      <p className="italic text-slate-500">* Lưu ý: Các bài kiểm tra/thi đạt điểm từ 8.0 trở xuống KHÔNG được áp dụng cộng điểm rèn luyện.</p>
-      <div className="overflow-x-auto">
-        <table className="w-full text-left border-collapse border border-slate-200">
-          <thead className="bg-emerald-50 font-bold text-emerald-900">
-            <tr><th className="p-2 border">Lĩnh Vực</th><th className="p-2 border">Hành Vi / Thành Tích Được Cộng Điểm</th><th className="p-2 border text-center">Mức Điểm Cộng</th></tr>
-          </thead>
-          <tbody className="divide-y">
-            {commendationGroups.map((group, gIdx) => (
-              group.items.map((r, idx) => (
-                <tr key={`${gIdx}-${idx}`}>
-                  {idx === 0 && <td className="p-2 border font-semibold" rowSpan={group.items.length}>{group.category}</td>}
-                  <td className="p-2 border">{r.content}</td>
-                  <td className="p-2 border text-center font-bold text-emerald-700">+{r.points} điểm / lần</td>
-                </tr>
-              ))
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      <h3 className="font-bold text-indigo-800 text-xs uppercase border-l-4 border-indigo-600 pl-2">III. Bảng Trừ Điểm Hàng Tuần (Theo Sổ Cờ Đỏ / Ban Cán Sự Lớp)</h3>
-      <div className="overflow-x-auto">
-        <table className="w-full text-left border-collapse border border-slate-200">
-          <thead className="bg-rose-50 font-bold text-rose-900">
-            <tr><th className="p-2 border">Lĩnh Vực Vi Phạm</th><th className="p-2 border">Hành Vi Vi Phạm Nội Quy</th><th className="p-2 border text-center">Mức Điểm Trừ</th></tr>
-          </thead>
-          <tbody className="divide-y">
-            {violationGroups.map((group, gIdx) => (
-              group.items.map((r, idx) => (
-                <tr key={`${gIdx}-${idx}`}>
-                  {idx === 0 && <td className="p-2 border font-semibold" rowSpan={group.items.length}>{group.category}</td>}
-                  <td className="p-2 border">{r.content}</td>
-                  <td className="p-2 border text-center font-bold text-rose-700">-{r.points} điểm / lần</td>
-                </tr>
-              ))
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      <h3 className="font-bold text-indigo-800 text-xs uppercase border-l-4 border-indigo-600 pl-2">IV. Công Thức Tính Điểm Tổng Kết</h3>
-      <div className="bg-slate-100 p-3 rounded-xl font-mono text-center text-indigo-900 border font-bold">
-        Điểm Tổng Kết HK = 100 − (Tổng Điểm Trừ Các Tuần) + (Tổng Điểm Cộng)
-      </div>
-    </div>
-  );
-}
-
-// Xuất nội dung Nội Quy Thi Đua ra file Word (.doc). Dùng phương pháp HTML
-// tương thích Word (không cần cài thêm thư viện docx) — Word/LibreOffice/
-// Google Docs đều mở được bình thường.
-function downloadCompetitionRulesAsWord() {
-  const commendationGroups = groupRulesByCategory(COMPETITION_RULES.filter(r => r.type === 'commendation'));
-  const violationGroups = groupRulesByCategory(COMPETITION_RULES.filter(r => r.type === 'violation'));
-
-  const rowsHtml = (groups: { category: string; items: CompetitionRule[] }[], sign: string, color: string) =>
-    groups.map(group =>
-      group.items.map((r, idx) => `
-        <tr>
-          ${idx === 0 ? `<td rowspan="${group.items.length}" style="font-weight:bold;">${group.category}</td>` : ''}
-          <td>${r.content}</td>
-          <td style="text-align:center;font-weight:bold;color:${color};">${sign}${r.points} điểm / lần</td>
-        </tr>`
-      ).join('')
-    ).join('');
-
-  const html = `
-    <html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
-    <head>
-      <meta charset="utf-8">
-      <title>Nội Quy Thi Đua</title>
-      <style>
-        body { font-family: 'Times New Roman', serif; font-size: 13pt; }
-        h1 { text-align: center; font-size: 15pt; }
-        h2 { font-size: 13pt; margin-top: 18pt; }
-        table { border-collapse: collapse; width: 100%; margin-top: 6pt; }
-        td, th { border: 1px solid #333; padding: 6px 8px; vertical-align: top; }
-        th { background: #eef; font-weight: bold; }
-        .formula { text-align: center; font-weight: bold; margin-top: 10pt; border: 1px solid #333; padding: 8px; }
-      </style>
-    </head>
-    <body>
-      <h1>BẢNG NỘI QUY VÀ QUY ĐỊNH ĐIỂM THI ĐUA RÈN LUYỆN</h1>
-      <p style="text-align:center;">Quỹ điểm ban đầu: <b>100 điểm / 1 Học kỳ</b>. Trừ điểm phát sinh theo từng tuần.</p>
-
-      <h2>I. Khung Xếp Loại Rèn Luyện Cuối Học Kỳ</h2>
-      <table>
-        <tr><th>Mức Điểm Tổng Kết</th><th>Xếp Loại Hạnh Kiểm</th><th>Tác Động & Hướng Xử Lý</th></tr>
-        <tr><td>≥ 85 điểm</td><td>TỐT</td><td>Tuyên dương, đề xuất khen thưởng Học sinh Tốt/Xuất sắc cuối kỳ.</td></tr>
-        <tr><td>60 – 84 điểm</td><td>KHÁ</td><td>Đạt mức nếp sống văn minh; cần duy trì và phát huy.</td></tr>
-        <tr><td>40 – 59 điểm</td><td>ĐẠT</td><td>Đạt mức tối thiểu; GVCN nhắc nhở và gửi thông báo về gia đình.</td></tr>
-        <tr><td>&lt; 40 điểm</td><td>CHƯA ĐẠT (YẾU)</td><td>Tạm hoãn xét thi đua, mời phụ huynh họp trực tiếp.</td></tr>
-      </table>
-
-      <h2>II. Bảng Cộng Điểm (Chỉ Cộng Điểm 9 & 10)</h2>
-      <table>
-        <tr><th>Lĩnh Vực</th><th>Hành Vi / Thành Tích Được Cộng Điểm</th><th>Mức Điểm Cộng</th></tr>
-        ${rowsHtml(commendationGroups, '+', '#0a7a3d')}
-      </table>
-
-      <h2>III. Bảng Trừ Điểm Hàng Tuần</h2>
-      <table>
-        <tr><th>Lĩnh Vực Vi Phạm</th><th>Hành Vi Vi Phạm Nội Quy</th><th>Mức Điểm Trừ</th></tr>
-        ${rowsHtml(violationGroups, '-', '#b91c1c')}
-      </table>
-
-      <h2>IV. Công Thức Tính Điểm Tổng Kết</h2>
-      <p class="formula">Điểm Tổng Kết HK = 100 − (Tổng Điểm Trừ Các Tuần) + (Tổng Điểm Cộng)</p>
-    </body>
-    </html>`;
-
-  const blob = new Blob(['\ufeff', html], { type: 'application/msword' });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = 'NoiQuyThiDua.doc';
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
-}
 
 // ==================== DANH SÁCH CHỨC VỤ BAN CÁN SỰ LỚP ====================
 // Dùng chung cho: dropdown đổi chức vụ trong bảng Danh Sách Học Sinh,
 // form Thêm Học Sinh Mới, và tab Phân Chia Tổ & Ban Cán Sự.
-const ROLES: string[] = ['Học sinh', 'Lớp trưởng', 'Lớp phó', 'Bí thư', 'Thư ký', 'Thủ quỹ', 'Tổ trưởng'];
+// LƯU Ý: Giữ nguyên chức vụ 'Lớp phó' (chung) để KHÔNG làm hỏng dữ liệu cũ của các học sinh
+// đã được gán 'Lớp phó' trước khi có 'Lớp phó học tập' / 'Lớp phó lao động'.
+const ROLES: string[] = [
+  'Học sinh', 'Lớp trưởng', 'Lớp phó học tập', 'Lớp phó lao động', 'Lớp phó',
+  'Bí thư', 'Thư ký', 'Thủ quỹ', 'Tổ trưởng',
+];
+
+// Các chức vụ mà cả lớp CHỈ CÓ 1 NGƯỜI giữ (Tổ trưởng: mỗi Tổ 1 người — xử lý riêng theo Tổ).
+// 'Lớp phó' (chung) không nằm trong danh sách này vì lớp có thể có nhiều Lớp phó.
+const UNIQUE_CLASS_ROLES: string[] = ['Lớp trưởng', 'Lớp phó học tập', 'Lớp phó lao động', 'Bí thư', 'Thư ký', 'Thủ quỹ'];
+
+// Bỏ dấu tiếng Việt + chữ thường + gộp khoảng trắng → dùng để so khớp chức vụ nhập từ Excel.
+const toRoleKey = (s: string): string =>
+  s.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'd')
+    .toLowerCase().replace(/\s+/g, ' ').trim();
+
+// Một số cách viết tắt hay gặp khi GV gõ trong file Excel.
+const ROLE_ALIASES: Record<string, string> = {
+  'lpht': 'Lớp phó học tập', 'lp ht': 'Lớp phó học tập', 'lp hoc tap': 'Lớp phó học tập',
+  'lop pho ht': 'Lớp phó học tập', 'pho hoc tap': 'Lớp phó học tập',
+  'lpld': 'Lớp phó lao động', 'lp ld': 'Lớp phó lao động', 'lp lao dong': 'Lớp phó lao động',
+  'lop pho ld': 'Lớp phó lao động', 'pho lao dong': 'Lớp phó lao động',
+  'lt': 'Lớp trưởng', 'hs': 'Học sinh',
+};
+
+// Chuẩn hóa chức vụ về đúng chuỗi trong ROLES (xử lý: viết hoa/thường, thừa khoảng trắng,
+// gõ không dấu, Unicode tổ hợp (NFD) từ Excel/VNI, viết tắt). Nếu không khớp thì giữ nguyên
+// chữ GV đã nhập (VD: 'Cờ đỏ') để không làm mất thông tin.
+const normalizeRole = (raw: any): string => {
+  const text = String(raw ?? '').normalize('NFC').replace(/\s+/g, ' ').trim();
+  if (!text) return 'Học sinh';
+  const key = toRoleKey(text);
+  const exact = ROLES.find(r => toRoleKey(r) === key);
+  if (exact) return exact;
+  if (ROLE_ALIASES[key]) return ROLE_ALIASES[key];
+  return text;
+};
+
+// Danh sách option cho các ô chọn chức vụ: nếu học sinh đang giữ một chức vụ không có trong ROLES
+// (dữ liệu cũ / nhập từ Excel), vẫn hiển thị đúng chức vụ đó thay vì hiển thị sai thành 'Học sinh'.
+const getRoleOptions = (current?: string): string[] =>
+  current && !ROLES.includes(current) ? [...ROLES, current] : ROLES;
 
 export default function App() {
   const [currentView, setCurrentView] = useState<ViewType>('login');
@@ -345,10 +154,6 @@ export default function App() {
   const [teachers, setTeachers] = useState<Teacher[]>([]);
   const [currentTeacher, setCurrentTeacher] = useState<Teacher | null>(null);
   const [loggedInStudent, setLoggedInStudent] = useState<Student | null>(null);
-  // Token phiên đăng nhập của học sinh/lớp trưởng/thủ quỹ (bcrypt + session
-  // token, KHÔNG còn dùng student.id trực tiếp cho các thao tác dữ liệu —
-  // xem chi tiết trong migration_5_session_token.sql).
-  const [sessionToken, setSessionToken] = useState<string | null>(null);
 
   const fetchTeachers = async () => {
     try {
@@ -359,34 +164,8 @@ export default function App() {
     }
   };
 
-  // Khôi phục phiên đăng nhập học sinh (nếu còn hạn) khi tải lại trang,
-  // để người dùng không bị đăng xuất mỗi khi F5. Token lưu ở sessionStorage
-  // (tự xóa khi đóng tab/trình duyệt) — KHÔNG lưu ở localStorage.
-  const restoreStudentSession = async () => {
-    const savedToken = sessionStorage.getItem('student_session_token');
-    if (!savedToken) return;
-
-    const { data, error } = await supabase.rpc('get_my_student', { p_session_token: savedToken });
-    if (error || !data || !data[0]) {
-      sessionStorage.removeItem('student_session_token');
-      return;
-    }
-
-    const student = data[0] as Student;
-    setLoggedInStudent(student);
-    setSessionToken(savedToken);
-    if (isRole(student.class_role, 'lớp trưởng', 'lop truong')) {
-      setCurrentView('class_leader_portal');
-    } else if (isRole(student.class_role, 'thủ quỹ', 'thu quy')) {
-      setCurrentView('treasurer_portal');
-    } else {
-      setCurrentView('student_portal');
-    }
-  };
-
   useEffect(() => {
     fetchTeachers();
-    restoreStudentSession();
     const { data: listener } = supabase.auth.onAuthStateChange((event) => {
       if (event === 'PASSWORD_RECOVERY') {
         setCurrentView('reset_password');
@@ -396,33 +175,10 @@ export default function App() {
   }, []);
 
   const handleLogout = async () => {
-    // Bọc try/finally: dù supabase.auth.signOut() hoặc RPC student_logout gặp
-    // lỗi mạng/khác, trạng thái đăng nhập vẫn PHẢI được xóa và quay về màn
-    // hình login — không để một bước lỗi làm treo cả nút Đăng Xuất.
-    try {
-      await supabase.auth.signOut();
-    } catch (err) {
-      console.error('Lỗi đăng xuất GVCN (bỏ qua, vẫn tiếp tục đăng xuất):', err);
-    }
-
-    if (sessionToken) {
-      try {
-        await supabase.rpc('student_logout', { p_session_token: sessionToken });
-      } catch (err) {
-        console.error('Lỗi hủy session học sinh (bỏ qua, vẫn tiếp tục đăng xuất):', err);
-      }
-      sessionStorage.removeItem('student_session_token');
-    }
-
+    await supabase.auth.signOut();
     setCurrentTeacher(null);
     setLoggedInStudent(null);
-    setSessionToken(null);
     setCurrentView('login');
-  };
-
-  const isRole = (role: string | undefined, ...keywords: string[]) => {
-    const r = (role || '').toLowerCase().trim();
-    return keywords.some(k => r.includes(k));
   };
 
   return (
@@ -447,14 +203,11 @@ export default function App() {
       {currentView === 'login' && (
         <LoginScreen
           onTeacherLogin={(teacher: Teacher) => { setCurrentTeacher(teacher); setCurrentView('teacher'); }}
-          onStudentLogin={(student: Student, token: string) => {
+          onStudentLogin={(student: Student) => {
             setLoggedInStudent(student);
-            setSessionToken(token);
-            sessionStorage.setItem('student_session_token', token);
-            if (isRole(student.class_role, 'lớp trưởng', 'lop truong')) {
+            const r = (student.class_role || '').toLowerCase().trim();
+            if (r.includes('lớp trưởng') || r.includes('lop truong')) {
               setCurrentView('class_leader_portal');
-            } else if (isRole(student.class_role, 'thủ quỹ', 'thu quy')) {
-              setCurrentView('treasurer_portal');
             } else {
               setCurrentView('student_portal');
             }
@@ -491,17 +244,14 @@ export default function App() {
         <TeacherDashboard teacher={currentTeacher} />
       )}
 
-      {currentView === 'class_leader_portal' && loggedInStudent && sessionToken && (
-        <ClassLeaderPortal student={loggedInStudent} sessionToken={sessionToken} onSwitchToStudentView={() => setCurrentView('student_portal')} />
+      {currentView === 'class_leader_portal' && loggedInStudent && (
+        <ClassLeaderPortal student={loggedInStudent} onSwitchToStudentView={() => setCurrentView('student_portal')} />
       )}
 
-      {currentView === 'treasurer_portal' && loggedInStudent && sessionToken && (
-        <TreasurerPortal student={loggedInStudent} sessionToken={sessionToken} onSwitchToStudentView={() => setCurrentView('student_portal')} />
-      )}
-
-      {currentView === 'student_portal' && loggedInStudent && sessionToken && (
+      {currentView === 'student_portal' && loggedInStudent && (
         <div className="space-y-2">
-          {isRole(loggedInStudent.class_role, 'lớp trưởng', 'lop truong') && (
+          {((loggedInStudent.class_role || '').toLowerCase().includes('lớp trưởng') ||
+            (loggedInStudent.class_role || '').toLowerCase().includes('lop truong')) && (
             <div className="max-w-5xl mx-auto pt-4 px-4 text-right">
               <button
                 onClick={() => setCurrentView('class_leader_portal')}
@@ -511,23 +261,11 @@ export default function App() {
               </button>
             </div>
           )}
-          {isRole(loggedInStudent.class_role, 'thủ quỹ', 'thu quy') && (
-            <div className="max-w-5xl mx-auto pt-4 px-4 text-right">
-              <button
-                onClick={() => setCurrentView('treasurer_portal')}
-                className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-4 py-2 rounded-xl shadow"
-              >
-                💰 Mở Cổng Quản Lý Quỹ Lớp - Thủ Quỹ
-              </button>
-            </div>
-          )}
           <StudentPortal
             student={loggedInStudent}
-            sessionToken={sessionToken}
             onRefreshStudent={async () => {
-              // Dùng RPC get_my_student với session token (không còn dùng student.id trực tiếp).
-              const { data } = await supabase.rpc('get_my_student', { p_session_token: sessionToken });
-              if (data && data[0]) setLoggedInStudent(data[0] as Student);
+              const { data } = await supabase.from('students').select('*').eq('id', loggedInStudent.id).maybeSingle();
+              if (data) setLoggedInStudent(data as Student);
             }}
           />
         </div>
@@ -547,15 +285,6 @@ function LoginScreen({ onTeacherLogin, onStudentLogin, onAdminLogin, onForgotPas
   const [matchedTeacher, setMatchedTeacher] = useState<{ id: string; full_name: string; school: string } | null>(null);
   const [studentCode, setStudentCode] = useState('');
   const [studentPassword, setStudentPassword] = useState('');
-
-  // "Quên mật khẩu" của học sinh: KHÔNG tự động reset (vì không có email
-  // để xác thực thật sự) — thay vào đó gửi 1 yêu cầu tới GVCN, GVCN xem
-  // và cấp lại mật khẩu mới thủ công (giống cách cấp mật khẩu ban đầu).
-  const [showStudentForgot, setShowStudentForgot] = useState(false);
-  const [forgotFullName, setForgotFullName] = useState('');
-  const [forgotNote, setForgotNote] = useState('');
-  const [forgotSending, setForgotSending] = useState(false);
-  const [forgotSent, setForgotSent] = useState(false);
 
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -653,10 +382,10 @@ function LoginScreen({ onTeacherLogin, onStudentLogin, onAdminLogin, onForgotPas
     if (!studentCode.trim() || !studentPassword.trim() || !matchedTeacher) return;
     setLoading(true);
 
-    // Mật khẩu được đối chiếu bằng bcrypt (crypt()) ngay trong hàm RPC, và
-    // hàm này tự tạo 1 session_token mới cho lượt đăng nhập này (xem
-    // migration_5_session_token.sql). App KHÔNG còn dùng student.id trực
-    // tiếp cho các thao tác sau đăng nhập nữa, mà dùng session_token.
+    // LƯU Ý QUAN TRỌNG: Hàm RPC "student_login" trong Supabase cần được cập nhật để
+    // nhận thêm tham số p_password và đối chiếu với cột "password" của học sinh
+    // (chỉ trả về kết quả khi MSHS VÀ Mật khẩu đều khớp). Nếu RPC hiện tại chưa hỗ
+    // trợ tham số này, cần sửa lại function trong Supabase (SQL Editor) tương ứng.
     const { data, error: rpcErr } = await supabase.rpc('student_login', {
       p_teacher_id: matchedTeacher.id,
       p_code: studentCode.trim(),
@@ -670,29 +399,7 @@ function LoginScreen({ onTeacherLogin, onStudentLogin, onAdminLogin, onForgotPas
       return;
     }
 
-    const row = data[0] as Student & { session_token: string };
-    onStudentLogin(row as Student, row.session_token);
-  };
-
-  const handleSubmitForgotPassword = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!matchedTeacher || !studentCode.trim() || !forgotFullName.trim()) {
-      alert('Vui lòng nhập đầy đủ MSHS (ở trên) và Họ và tên.');
-      return;
-    }
-    setForgotSending(true);
-    const { error } = await supabase.from('password_reset_requests').insert([{
-      teacher_id: matchedTeacher.id,
-      student_code: studentCode.trim().toUpperCase(),
-      full_name: forgotFullName.trim(),
-      note: forgotNote.trim() || null,
-    }]);
-    setForgotSending(false);
-    if (error) {
-      alert('Lỗi gửi yêu cầu: ' + error.message);
-      return;
-    }
-    setForgotSent(true);
+    onStudentLogin(data[0] as Student);
   };
 
   return (
@@ -773,42 +480,11 @@ function LoginScreen({ onTeacherLogin, onStudentLogin, onAdminLogin, onForgotPas
                 value={studentPassword} onChange={e => setStudentPassword(e.target.value)}
                 className="w-full p-3 border rounded-xl text-sm"
               />
-              <p className="text-[11px] text-slate-400 mt-1 italic">* Nếu chưa có mật khẩu hoặc quên mật khẩu, vui lòng liên hệ Giáo viên chủ nhiệm để được cấp lại, hoặc gửi yêu cầu bên dưới.</p>
+              <p className="text-[11px] text-slate-400 mt-1 italic">* Nếu chưa có mật khẩu hoặc quên mật khẩu, vui lòng liên hệ Giáo viên chủ nhiệm để được cấp lại.</p>
             </div>
             <button type="submit" disabled={loading} className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-sm shadow transition">
               {loading ? 'Đang xác thực...' : 'Đăng Nhập'}
             </button>
-
-            <button
-              type="button"
-              onClick={() => { setShowStudentForgot(!showStudentForgot); setForgotSent(false); }}
-              className="w-full text-center text-indigo-600 hover:underline font-medium"
-            >
-              {showStudentForgot ? 'Đóng' : 'Quên mật khẩu?'}
-            </button>
-
-            {showStudentForgot && (
-              forgotSent ? (
-                <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl font-medium text-center">
-                  ✓ Đã gửi yêu cầu tới Giáo viên chủ nhiệm! Vui lòng chờ được cấp lại mật khẩu mới.
-                </div>
-              ) : (
-                <div className="p-3 bg-slate-50 border rounded-xl space-y-2.5">
-                  <p className="text-[11px] text-slate-500 italic">Nhập MSHS ở ô "Bước 2" phía trên trước, sau đó điền thông tin dưới đây để gửi yêu cầu cấp lại mật khẩu tới GVCN.</p>
-                  <div>
-                    <label className="font-semibold block mb-1">Họ và tên của em (*):</label>
-                    <input type="text" placeholder="Để GVCN xác nhận đúng người" value={forgotFullName} onChange={e => setForgotFullName(e.target.value)} className="w-full p-2.5 border rounded-xl" />
-                  </div>
-                  <div>
-                    <label className="font-semibold block mb-1">Ghi chú (không bắt buộc):</label>
-                    <input type="text" placeholder="VD: Em quên mật khẩu đã đổi trước đó" value={forgotNote} onChange={e => setForgotNote(e.target.value)} className="w-full p-2.5 border rounded-xl" />
-                  </div>
-                  <button type="button" onClick={handleSubmitForgotPassword} disabled={forgotSending} className="w-full py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl font-bold shadow transition">
-                    {forgotSending ? 'Đang gửi...' : 'Gửi Yêu Cầu Cấp Lại Mật Khẩu'}
-                  </button>
-                </div>
-              )
-            )}
           </form>
         )}
       </div>
@@ -926,13 +602,10 @@ function RegisterWithPaymentScreen({ onSuccess, onCancel }: any) {
 }
 
 // ==================== 3. CỔNG THÔNG TIN DÀNH CHO HỌC SINH ====================
-function StudentPortal({ student, sessionToken, onRefreshStudent }: { student: Student; sessionToken: string; onRefreshStudent: () => void }) {
+function StudentPortal({ student, onRefreshStudent }: { student: Student; onRefreshStudent: () => void }) {
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [feeItems, setFeeItems] = useState<FeeItem[]>([]);
   const [feePayments, setFeePayments] = useState<FeePayment[]>([]);
-  const [allFeePayments, setAllFeePayments] = useState<FeePayment[]>([]);
-  const [feeExpenses, setFeeExpenses] = useState<FeeExpense[]>([]);
-  const [groupScores, setGroupScores] = useState<GroupWeeklyScore[]>([]);
   const [records, setRecords] = useState<StudentRecord[]>([]);
   const [showRules, setShowRules] = useState(false);
   const [showChangePassword, setShowChangePassword] = useState(false);
@@ -969,81 +642,22 @@ function StudentPortal({ student, sessionToken, onRefreshStudent }: { student: S
     secret_message: ''
   });
 
-  // "Góc Chia Sẻ" tách RIÊNG khỏi phiếu khảo sát đầu năm — luôn hiển thị,
-  // không phụ thuộc student.survey_completed, để học sinh đã khảo sát rồi
-  // vẫn chia sẻ/cập nhật được bất cứ lúc nào. Khởi tạo từ dữ liệu đã lưu
-  // trước đó (nếu có) trong survey_info.
-  const [sharingData, setSharingData] = useState({
-    family_difficulties: student.survey_info?.family_difficulties || '',
-    family_share: student.survey_info?.family_share || '',
-    support_request: student.survey_info?.support_request || '',
-    home_comfort_level: student.survey_info?.home_comfort_level || 'Rất tốt',
-    scholarship_need: student.survey_info?.scholarship_need || '',
-    scholarship_specific_need: student.survey_info?.scholarship_specific_need || '',
-    difficulty_and_effort: student.survey_info?.difficulty_and_effort || '',
-    private_family_note: student.survey_info?.private_family_note || '',
-  });
-  const [sharingSaving, setSharingSaving] = useState(false);
-  const [sharingSaved, setSharingSaved] = useState(false);
-
-  const handleSubmitSharing = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSharingSaving(true);
-    // student_submit_sharing GỘP (merge) dữ liệu này vào survey_info hiện có,
-    // KHÔNG ghi đè các phần khác của phiếu khảo sát và KHÔNG đụng tới cờ
-    // survey_completed — cho phép chia sẻ độc lập, gửi lại nhiều lần.
-    const { error } = await supabase.rpc('student_submit_sharing', {
-      p_session_token: sessionToken,
-      p_sharing_info: sharingData,
-    });
-    setSharingSaving(false);
-    if (error) {
-      alert('Lỗi gửi Góc Chia Sẻ: ' + error.message);
-      return;
-    }
-    setSharingSaved(true);
-    onRefreshStudent();
-  };
-
   useEffect(() => {
     fetchStudentData();
-  }, [student.id, sessionToken]);
+  }, [student.id]);
 
-  // LƯU Ý BẢO MẬT: toàn bộ dữ liệu bên dưới được đọc qua các hàm RPC
-  // get_class_*/get_my_* (SECURITY DEFINER) thay vì đọc trực tiếp bảng.
-  // Các hàm này tự tra đúng teacher_id của lớp học sinh này rồi mới trả
-  // dữ liệu, nên học sinh lớp A không thể đọc được dữ liệu của lớp B dù
-  // biết được URL API — xem chi tiết trong migration_4_bao_mat_toan_dien.sql.
   const fetchStudentData = async () => {
-    const [annRes, feeRes, payRes, recRes, expRes, scoreRes] = await Promise.all([
-      supabase.rpc('get_class_announcements', { p_session_token: sessionToken }).order('created_date', { ascending: false }).order('id', { ascending: false }),
-      supabase.rpc('get_class_fee_items', { p_session_token: sessionToken }),
-      supabase.rpc('get_class_fee_payments', { p_session_token: sessionToken }),
-      supabase.rpc('get_my_student_records', { p_session_token: sessionToken }).order('week_number', { ascending: false }),
-      supabase.rpc('get_class_fee_expenses', { p_session_token: sessionToken }).order('expense_date', { ascending: false }),
-      supabase.rpc('get_class_group_weekly_scores', { p_session_token: sessionToken }).order('week_number', { ascending: true })
+    const [annRes, feeRes, payRes, recRes] = await Promise.all([
+      supabase.from('announcements').select('*').eq('teacher_id', student.teacher_id).order('created_date', { ascending: false }).order('id', { ascending: false }),
+      supabase.from('fee_items').select('*').eq('teacher_id', student.teacher_id),
+      supabase.from('fee_payments').select('*').eq('student_id', student.id),
+      supabase.from('student_records').select('*').eq('student_id', student.id).order('week_number', { ascending: false })
     ]);
-
-    if (annRes.error) console.error('Lỗi tải thông báo:', annRes.error.message);
-    if (feeRes.error) console.error('Lỗi tải khoản thu:', feeRes.error.message);
-    if (payRes.error) console.error('Lỗi tải lượt nộp tiền:', payRes.error.message);
-    if (recRes.error) console.error('Lỗi tải nhật ký rèn luyện:', recRes.error.message);
-    if (expRes.error) console.error('Lỗi tải khoản chi:', expRes.error.message);
-    if (scoreRes.error) console.error('Lỗi tải điểm thi đua Tổ:', scoreRes.error.message);
 
     if (annRes.data) setAnnouncements(annRes.data as Announcement[]);
     if (feeRes.data) setFeeItems(feeRes.data as FeeItem[]);
+    if (payRes.data) setFeePayments(payRes.data as FeePayment[]);
     if (recRes.data) setRecords(recRes.data as StudentRecord[]);
-    if (expRes.data) setFeeExpenses(expRes.data as FeeExpense[]);
-    if (scoreRes.data) setGroupScores(scoreRes.data as GroupWeeklyScore[]);
-
-    // get_class_fee_payments trả về TOÀN BỘ lượt nộp tiền của cả lớp (để tính
-    // Tổng Quỹ Đã Thu công khai) — tách riêng lượt của CHÍNH học sinh này
-    // (feePayments, dùng để hiển thị "Đã nộp/Chưa nộp" ở bảng cá nhân) và
-    // toàn bộ lượt đã nộp (allFeePayments, dùng để tính tổng quỹ cả lớp).
-    const allPayments = (payRes.data || []) as FeePayment[];
-    setFeePayments(allPayments.filter(p => p.student_id === student.id));
-    setAllFeePayments(allPayments.filter(p => p.is_paid));
   };
 
   // Lớp trưởng có thể gửi lại báo cáo thi đua tuần nhiều lần (mỗi lần gửi tạo 1 dòng thông báo mới).
@@ -1070,12 +684,10 @@ function StudentPortal({ student, sessionToken, onRefreshStudent }: { student: S
 
   const handleSaveSurvey = async (e: React.FormEvent) => {
     e.preventDefault();
-    // Dùng RPC student_submit_survey thay vì update trực tiếp bảng students
-    // (học sinh không có quyền update trực tiếp sau khi khóa RLS).
-    const { error } = await supabase.rpc('student_submit_survey', {
-      p_session_token: sessionToken,
-      p_survey_info: surveyData,
-    });
+    const { error } = await supabase.from('students').update({
+      survey_completed: true,
+      survey_info: surveyData
+    }).eq('id', student.id);
 
     if (error) {
       alert('Lỗi lưu khảo sát: ' + error.message);
@@ -1086,14 +698,16 @@ function StudentPortal({ student, sessionToken, onRefreshStudent }: { student: S
   };
 
   // Cho phép học sinh TỰ đổi mật khẩu đăng nhập của chính mình (bảo mật hơn khi không phải
-  // nhờ Giáo viên cấp lại). Việc xác thực mật khẩu hiện tại giờ được thực hiện HOÀN TOÀN
-  // trên server qua RPC student_change_password (đối chiếu bcrypt hash) — trình duyệt
-  // không còn giữ/so sánh mật khẩu dạng chữ thường của học sinh nữa.
+  // nhờ Giáo viên cấp lại). Yêu cầu nhập đúng mật khẩu hiện tại trước khi đổi.
   const handleChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();
 
     if (!pwForm.current.trim() || !pwForm.next.trim() || !pwForm.confirm.trim()) {
       alert('Vui lòng nhập đầy đủ Mật khẩu hiện tại, Mật khẩu mới và Nhập lại mật khẩu mới.');
+      return;
+    }
+    if (pwForm.current !== (student.password || '')) {
+      alert('Mật khẩu hiện tại không đúng!');
       return;
     }
     if (pwForm.next.length < 4) {
@@ -1110,15 +724,11 @@ function StudentPortal({ student, sessionToken, onRefreshStudent }: { student: S
     }
 
     setPwSaving(true);
-    const { error } = await supabase.rpc('student_change_password', {
-      p_session_token: sessionToken,
-      p_current_password: pwForm.current,
-      p_new_password: pwForm.next,
-    });
+    const { error } = await supabase.from('students').update({ password: pwForm.next.trim() }).eq('id', student.id);
     setPwSaving(false);
 
     if (error) {
-      alert('Mật khẩu hiện tại không đúng hoặc có lỗi xảy ra: ' + error.message);
+      alert('Lỗi đổi mật khẩu: ' + error.message);
       return;
     }
 
@@ -1131,15 +741,6 @@ function StudentPortal({ student, sessionToken, onRefreshStudent }: { student: S
   const totalDeduction = (records || []).filter(r => r.type === 'violation').reduce((sum, r) => sum + Number(r.points || 0), 0);
   const totalBonus = (records || []).filter(r => r.type === 'commendation').reduce((sum, r) => sum + Number(r.points || 0), 0);
   const currentTotalScore = 100 - totalDeduction + totalBonus;
-
-  const totalCollected = feeItems.reduce((sum, item) => {
-    const paidCount = allFeePayments.filter(p => p.fee_item_id === item.id).length;
-    return sum + Number(item.amount) * paidCount;
-  }, 0);
-  const totalExpense = feeExpenses.reduce((sum, e) => sum + Number(e.amount), 0);
-  const fundBalance = totalCollected - totalExpense;
-
-  const weeksWithScores = [...new Set(groupScores.map(s => s.week_number))].sort((a, b) => a - b);
 
   return (
     <div className="max-w-5xl mx-auto p-4 md:p-6 space-y-6 text-xs font-sans">
@@ -1207,7 +808,78 @@ function StudentPortal({ student, sessionToken, onRefreshStudent }: { student: S
             <h2 className="text-base font-bold text-slate-900 uppercase">BẢNG QUY ĐỊNH VÀ BẢNG ĐIỂM RÈN LUYỆN CHI TIẾT (ÁP DỤNG THPT)</h2>
             <p className="text-slate-500 text-[11px] mt-1">Quỹ điểm ban đầu: <strong>100 điểm / 1 Học kỳ</strong>. Cách quản lý: Trừ điểm phát sinh theo từng tuần.</p>
           </div>
-          <CompetitionRulesContent />
+
+          <div className="space-y-4 text-slate-700 leading-relaxed">
+            <h3 className="font-bold text-indigo-800 text-xs uppercase border-l-4 border-indigo-600 pl-2">I. Khung Xếp Loại Rèn Luyện Cuối Học Kỳ</h3>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse border border-slate-200">
+                <thead className="bg-indigo-50 font-bold text-indigo-900">
+                  <tr>
+                    <th className="p-2 border">Mức Điểm Tổng Kết</th>
+                    <th className="p-2 border">Xếp Loại Hạnh Kiểm</th>
+                    <th className="p-2 border">Tác Động & Hướng Xử Lý</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  <tr><td className="p-2 border font-bold">≥ 85 điểm</td><td className="p-2 border text-emerald-700 font-bold">TỐT</td><td className="p-2 border">Tuyên dương, đề xuất khen thưởng Học sinh Tốt/Xuất sắc cuối kỳ.</td></tr>
+                  <tr><td className="p-2 border font-bold">60 – 84 điểm</td><td className="p-2 border text-blue-700 font-bold">KHÁ</td><td className="p-2 border">Đạt mức nếp sống văn minh; cần duy trì và phát huy.</td></tr>
+                  <tr><td className="p-2 border font-bold">40 – 59 điểm</td><td className="p-2 border text-amber-700 font-bold">ĐẠT</td><td className="p-2 border">Đạt mức tối thiểu; GVCN nhắc nhở và gửi thông báo về gia đình.</td></tr>
+                  <tr><td className="p-2 border font-bold">&lt; 40 điểm</td><td className="p-2 border text-rose-700 font-bold">CHƯA ĐẠT (YẾU)</td><td className="p-2 border">Tạm hoãn xét thi đua, mời phụ huynh họp trực tiếp và thực hiện Kế hoạch rèn luyện đặc biệt.</td></tr>
+                </tbody>
+              </table>
+            </div>
+
+            <h3 className="font-bold text-indigo-800 text-xs uppercase border-l-4 border-indigo-600 pl-2">II. Bảng Cộng Điểm (Chỉ Cộng Điểm 9 & 10)</h3>
+            <p className="italic text-slate-500">* Lưu ý: Các bài kiểm tra/thi đạt điểm từ 8.0 trở xuống KHÔNG được áp dụng cộng điểm rèn luyện.</p>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse border border-slate-200">
+                <thead className="bg-emerald-50 font-bold text-emerald-900">
+                  <tr><th className="p-2 border">Lĩnh Vực</th><th className="p-2 border">Hành Vi / Thành Tích Được Cộng Điểm</th><th className="p-2 border text-center">Mức Điểm Cộng</th></tr>
+                </thead>
+                <tbody className="divide-y">
+                  <tr><td className="p-2 border font-semibold" rowSpan={2}>Kiểm tra / Thi</td><td className="p-2 border">Đạt điểm 10 trong bài kiểm tra (Miệng, 15 phút, Giữa kỳ, Cuối kỳ)</td><td className="p-2 border text-center font-bold text-emerald-700">+3 điểm / lần</td></tr>
+                  <tr><td className="p-2 border">Đạt điểm 9 trong bài kiểm tra (Miệng, 15 phút, Giữa kỳ, Cuối kỳ)</td><td className="p-2 border text-center font-bold text-emerald-700">+2 điểm / lần</td></tr>
+                  <tr><td className="p-2 border font-semibold" rowSpan={2}>Thi Đấu / Phong Trào</td><td className="p-2 border">Đạt giải Học sinh giỏi / KHKT / Thể thao cấp Trường (hoặc tương đương)</td><td className="p-2 border text-center font-bold text-emerald-700">+5 điểm / giải</td></tr>
+                  <tr><td className="p-2 border">Đạt giải Học sinh giỏi / KHKT cấp Tỉnh / Thành phố trở lên</td><td className="p-2 border text-center font-bold text-emerald-700">+10 điểm / giải</td></tr>
+                  <tr><td className="p-2 border font-semibold" rowSpan={2}>Đóng Góp Tập Thể</td><td className="p-2 border">Ban cán sự lớp (Lớp trưởng, Lớp phó, Cờ đỏ) hoàn thành xuất sắc nhiệm vụ</td><td className="p-2 border text-center font-bold text-emerald-700">+5 điểm / HK</td></tr>
+                  <tr><td className="p-2 border">Nhặt được của rơi trả lại người mất / Hành động dũng cảm giúp đỡ cộng đồng</td><td className="p-2 border text-center font-bold text-emerald-700">+5 điểm / lần</td></tr>
+                </tbody>
+              </table>
+            </div>
+
+            <h3 className="font-bold text-indigo-800 text-xs uppercase border-l-4 border-indigo-600 pl-2">III. Bảng Trừ Điểm Hàng Tuần (Theo Sổ Cờ Đỏ / Ban Cán Sự Lớp)</h3>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse border border-slate-200">
+                <thead className="bg-rose-50 font-bold text-rose-900">
+                  <tr><th className="p-2 border">Lĩnh Vực Vi Phạm</th><th className="p-2 border">Hành Vi Vi Phạm Nội Quy</th><th className="p-2 border text-center">Mức Điểm Trừ</th></tr>
+                </thead>
+                <tbody className="divide-y">
+                  <tr><td className="p-2 border font-semibold" rowSpan={4}>Chuyên Cần & Giờ Giấc</td><td className="p-2 border">Đi học muộn (sau tiếng trống vào lớp / giờ truy bài)</td><td className="p-2 border text-center font-bold text-rose-700">-2 điểm / lần</td></tr>
+                  <tr><td className="p-2 border">Bỏ giờ truy bài 15 phút đầu giờ</td><td className="p-2 border text-center font-bold text-rose-700">-3 điểm / lần</td></tr>
+                  <tr><td className="p-2 border">Nghỉ học không lý do (nghỉ chui)</td><td className="p-2 border text-center font-bold text-rose-700">-10 điểm / buổi</td></tr>
+                  <tr><td className="p-2 border">Trốn tiết / Trốn học giữa giờ</td><td className="p-2 border text-center font-bold text-rose-700">-15 điểm / lần</td></tr>
+                  <tr><td className="p-2 border font-semibold" rowSpan={5}>Nề Nếp Học Tập</td><td className="p-2 border">Không làm bài tập về nhà / Không chuẩn bị bài theo yêu cầu GVBM</td><td className="p-2 border text-center font-bold text-rose-700">-3 điểm / lần</td></tr>
+                  <tr><td className="p-2 border">Không mang sách vở, dụng cụ học tập theo thời khóa biểu</td><td className="p-2 border text-center font-bold text-rose-700">-2 điểm / lần</td></tr>
+                  <tr><td className="p-2 border">Mất trật tự, làm việc riêng, ngủ gật trong giờ học</td><td className="p-2 border text-center font-bold text-rose-700">-2 điểm / lần</td></tr>
+                  <tr><td className="p-2 border">Sử dụng điện thoại di động khi chưa có sự cho phép của giáo viên</td><td className="p-2 border text-center font-bold text-rose-700">-5 điểm / lần</td></tr>
+                  <tr><td className="p-2 border">Gian lận trong kiểm tra, thi cử (quay cóp, sử dụng tài liệu)</td><td className="p-2 border text-center font-bold text-rose-700">-20 điểm / lần</td></tr>
+                  <tr><td className="p-2 border font-semibold" rowSpan={4}>Trang Phục & Rèn Luyện</td><td className="p-2 border">Sai đồng phục, không đeo thẻ học sinh, đi dép lê không quai</td><td className="p-2 border text-center font-bold text-rose-700">-2 điểm / lỗi / buổi</td></tr>
+                  <tr><td className="p-2 border">Nhuộm tóc màu sáng, nhuộm Highlight, nam để tóc quá dài</td><td className="p-2 border text-center font-bold text-rose-700">-5 điểm / lần</td></tr>
+                  <tr><td className="p-2 border">Trang điểm đậm, sơn móng tay/móng chân màu nổi bật</td><td className="p-2 border text-center font-bold text-rose-700">-3 điểm / lần</td></tr>
+                  <tr><td className="p-2 border">Hút thuốc lá, thuốc lá điện tử trong trường (hoặc vi phạm ATGT)</td><td className="p-2 border text-center font-bold text-rose-700">-20 điểm / lần</td></tr>
+                  <tr><td className="p-2 border font-semibold" rowSpan={4}>Môi Trường & Văn Hóa</td><td className="p-2 border">Bỏ trực nhật / Trực nhật sơ sài, không đổ rác đúng quy định</td><td className="p-2 border text-center font-bold text-rose-700">-5 điểm / lần</td></tr>
+                  <tr><td className="p-2 border">Xả rác bừa bãi trong lớp hoặc khuôn viên trường</td><td className="p-2 border text-center font-bold text-rose-700">-3 điểm / lần</td></tr>
+                  <tr><td className="p-2 border">Nói tục, chửi thề, gây mất đoàn kết nội bộ lớp</td><td className="p-2 border text-center font-bold text-rose-700">-5 điểm / lần</td></tr>
+                  <tr><td className="p-2 border">Mang đồ ăn, nước ngọt vào sử dụng trong giờ học</td><td className="p-2 border text-center font-bold text-rose-700">-2 điểm / lần</td></tr>
+                </tbody>
+              </table>
+            </div>
+
+            <h3 className="font-bold text-indigo-800 text-xs uppercase border-l-4 border-indigo-600 pl-2">IV. Công Thức Tính Điểm Tổng Kết</h3>
+            <div className="bg-slate-100 p-3 rounded-xl font-mono text-center text-indigo-900 border font-bold">
+              Điểm Tổng Kết HK = 100 − (Tổng Điểm Trừ Các Tuần) + (Tổng Điểm Cộng)
+            </div>
+          </div>
         </div>
       )}
 
@@ -1336,43 +1008,6 @@ function StudentPortal({ student, sessionToken, onRefreshStudent }: { student: S
         )}
       </div>
 
-      {weeksWithScores.length > 0 && (
-        <div className="bg-white p-5 rounded-2xl border shadow-sm space-y-3">
-          <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2 border-b pb-2">
-            <Trophy className="w-4.5 h-4.5 text-amber-500" /> Thi Đua Các Tổ Theo Từng Tuần
-          </h2>
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
-              <thead className="bg-slate-50 font-bold border-b text-slate-700">
-                <tr>
-                  <th className="p-2 border-r text-center">Tuần</th>
-                  <th className="p-2 border-r text-center">Tổ 1</th>
-                  <th className="p-2 border-r text-center">Tổ 2</th>
-                  <th className="p-2 border-r text-center">Tổ 3</th>
-                  <th className="p-2 text-center">Tổ 4</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y">
-                {weeksWithScores.map(week => (
-                  <tr key={week} className={(student.group_number || 1) ? 'hover:bg-slate-50' : ''}>
-                    <td className="p-2 border-r text-center font-bold">{week}</td>
-                    {[1, 2, 3, 4].map(g => {
-                      const row = groupScores.find(s => s.week_number === week && s.group_number === g);
-                      const isMyGroup = (student.group_number || 1) === g;
-                      return (
-                        <td key={g} className={`p-2 border-r last:border-r-0 text-center font-bold ${isMyGroup ? 'bg-indigo-50 text-indigo-700' : 'text-slate-600'}`}>
-                          {row ? row.score : '—'}
-                        </td>
-                      );
-                    })}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
       <div className="bg-white p-5 rounded-2xl border shadow-sm space-y-3">
         <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2 border-b pb-2">
           <Wallet className="w-4.5 h-4.5 text-indigo-600" /> Các Khoản Thu & Quỹ Lớp
@@ -1396,12 +1031,7 @@ function StudentPortal({ student, sessionToken, onRefreshStudent }: { student: S
                   const isPaid = pay?.is_paid || false;
                   return (
                     <tr key={item.id} className="hover:bg-slate-50">
-                      <td className="p-3 border-r font-semibold text-slate-800">
-                        {item.title}
-                        {item.is_completed && (
-                          <span className="ml-1.5 text-[10px] bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded-full font-bold align-middle">✅ Đã Xong</span>
-                        )}
-                      </td>
+                      <td className="p-3 border-r font-semibold text-slate-800">{item.title}</td>
                       <td className="p-3 border-r text-right font-bold text-indigo-700">{Number(item.amount).toLocaleString()} VNĐ</td>
                       <td className="p-3 border-r text-center text-slate-500 font-medium">{item.deadline || 'Không có'}</td>
                       <td className="p-3 text-center">
@@ -1422,125 +1052,6 @@ function StudentPortal({ student, sessionToken, onRefreshStudent }: { student: S
             </table>
           </div>
         )}
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-3 border-t">
-          <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-center">
-            <span className="text-[10px] text-emerald-700 font-bold uppercase block">Tổng Đã Thu (Cả Lớp)</span>
-            <span className="text-lg font-black text-emerald-700">{totalCollected.toLocaleString()} đ</span>
-          </div>
-          <div className="bg-rose-50 border border-rose-200 rounded-xl p-3 text-center">
-            <span className="text-[10px] text-rose-700 font-bold uppercase block">Tổng Đã Chi</span>
-            <span className="text-lg font-black text-rose-700">{totalExpense.toLocaleString()} đ</span>
-          </div>
-          <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-3 text-center">
-            <span className="text-[10px] text-indigo-700 font-bold uppercase block">Quỹ Lớp Còn Lại</span>
-            <span className="text-lg font-black text-indigo-700">{fundBalance.toLocaleString()} đ</span>
-          </div>
-        </div>
-
-        {feeExpenses.length > 0 && (
-          <div className="pt-2">
-            <h3 className="font-bold text-slate-700 mb-2 flex items-center gap-1.5"><Receipt className="w-4 h-4 text-rose-600" /> Chi Tiết Các Khoản Đã Chi</h3>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse">
-                <thead className="bg-rose-50 font-bold border-b text-rose-800">
-                  <tr>
-                    <th className="p-2 border-r">Ngày Chi</th>
-                    <th className="p-2 border-r">Nội Dung Chi</th>
-                    <th className="p-2 border-r text-right">Số Tiền</th>
-                    <th className="p-2">Ghi Chú</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y">
-                  {feeExpenses.map(e => (
-                    <tr key={e.id} className="hover:bg-slate-50">
-                      <td className="p-2 border-r font-mono text-slate-600">{e.expense_date}</td>
-                      <td className="p-2 border-r font-semibold">{e.title}</td>
-                      <td className="p-2 border-r text-right font-bold text-rose-700">{Number(e.amount).toLocaleString()} đ</td>
-                      <td className="p-2 text-slate-500 italic">{e.note || '—'}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-      </div>
-
-      <div className="bg-gradient-to-br from-amber-50 via-orange-50 to-white p-5 rounded-2xl border border-amber-200 shadow-sm space-y-4">
-        <div>
-          <h2 className="text-sm font-bold text-amber-900 flex items-center gap-2 border-b border-amber-200 pb-2">
-            💛 Góc Chia Sẻ
-          </h2>
-          <p className="text-slate-600 mt-1.5 leading-relaxed">
-            Mục này để em chia sẻ với thầy/cô chủ nhiệm về hoàn cảnh gia đình, khó khăn trong học tập, hoặc nguyện vọng nhận hỗ trợ (học bổng, sách vở...). Hoàn toàn không bắt buộc, em có thể gửi hoặc cập nhật bất cứ lúc nào, và chỉ Giáo viên chủ nhiệm mới xem được.
-          </p>
-        </div>
-
-        <form onSubmit={handleSubmitSharing} className="space-y-3 bg-white p-4 rounded-xl border border-amber-100">
-          <div>
-            <label className="font-semibold block mb-1">Gia đình em có đang gặp khó khăn nào về điều kiện học tập không? (Phương tiện đi lại, góc học tập ở nhà, tài liệu học tập, thiết bị kết nối internet...):</label>
-            <textarea rows={2} placeholder="Nếu có, em hãy chia sẻ để thầy/cô hỗ trợ..." value={sharingData.family_difficulties} onChange={e => { setSharingData({ ...sharingData, family_difficulties: e.target.value }); setSharingSaved(false); }} className="w-full p-2 border rounded-xl" />
-          </div>
-          <div>
-            <label className="font-semibold block mb-1">Có điều gì về gia đình mà em muốn thầy/cô biết để hỗ trợ em tốt hơn trong năm học này không?</label>
-            <textarea rows={2} placeholder="Chia sẻ của em (nếu có)..." value={sharingData.family_share} onChange={e => { setSharingData({ ...sharingData, family_share: e.target.value }); setSharingSaved(false); }} className="w-full p-2 border rounded-xl" />
-          </div>
-          <div>
-            <label className="font-semibold block mb-1">Em có nguyện vọng nhận hỗ trợ về học bổng, sách vở hay góc tư vấn riêng không?</label>
-            <textarea rows={2} placeholder="Chia sẻ nguyện vọng của em (nếu có)..." value={sharingData.support_request} onChange={e => { setSharingData({ ...sharingData, support_request: e.target.value }); setSharingSaved(false); }} className="w-full p-2 border rounded-xl" />
-          </div>
-          <div>
-            <label className="font-semibold block mb-1">Mức độ an tâm/thoải mái của em khi ở nhà hiện tại:</label>
-            <select value={sharingData.home_comfort_level} onChange={e => { setSharingData({ ...sharingData, home_comfort_level: e.target.value }); setSharingSaved(false); }} className="w-full p-2 border rounded-xl">
-              <option value="Rất tốt">Rất tốt</option>
-              <option value="Bình thường">Bình thường</option>
-              <option value="Thỉnh thoảng có áp lực">Thỉnh thoảng có áp lực</option>
-              <option value="Rất áp lực">Rất áp lực</option>
-            </select>
-          </div>
-
-          <div>
-            <label className="font-semibold block mb-1.5">Trong năm học này, nhà trường và các nhà hảo tâm có một số suất học bổng/gói hỗ trợ dành cho học sinh có tinh thần vượt khó. Em có nghĩ hoàn cảnh hiện tại của mình cần sự đồng hành này không?</label>
-            <div className="space-y-1.5">
-              {[
-                'Rất cần để giảm bớt gánh nặng cho gia đình',
-                'Cần hỗ trợ một phần (sách vở, đồ dùng học tập, phương tiện)',
-                'Hiện tại gia đình em vẫn tự thu xếp ổn định',
-              ].map(option => (
-                <label key={option} className="flex items-center gap-2 p-2 border rounded-xl cursor-pointer hover:bg-slate-50">
-                  <input
-                    type="radio"
-                    name="scholarship_need"
-                    checked={sharingData.scholarship_need === option}
-                    onChange={() => { setSharingData({ ...sharingData, scholarship_need: option }); setSharingSaved(false); }}
-                    className="w-4 h-4 accent-amber-600"
-                  />
-                  <span>{option}</span>
-                </label>
-              ))}
-            </div>
-          </div>
-
-          <div>
-            <label className="font-semibold block mb-1">Nếu nhận được một suất học bổng hoặc sự hỗ trợ từ trường, điều đó sẽ giúp em và gia đình giải quyết khó khăn cụ thể nào nhất?</label>
-            <textarea rows={2} placeholder="Chia sẻ của em (nếu có)..." value={sharingData.scholarship_specific_need} onChange={e => { setSharingData({ ...sharingData, scholarship_specific_need: e.target.value }); setSharingSaved(false); }} className="w-full p-2 border rounded-xl" />
-          </div>
-
-          <div>
-            <label className="font-semibold block mb-1">Thầy cô rất trân trọng nỗ lực vượt khó của các em. Hãy chia sẻ ngắn gọn về một khó khăn mà em/gia đình đang đối mặt và cách em đang cố gắng vượt qua mỗi ngày:</label>
-            <textarea rows={2} placeholder="Chia sẻ của em (nếu có)..." value={sharingData.difficulty_and_effort} onChange={e => { setSharingData({ ...sharingData, difficulty_and_effort: e.target.value }); setSharingSaved(false); }} className="w-full p-2 border rounded-xl" />
-          </div>
-
-          <div>
-            <label className="font-semibold block mb-1">Có điều gì đặc biệt về gia đình mà em thấy khó nói trước đám đông, nhưng muốn thầy/cô chủ nhiệm biết để chủ động đề xuất hỗ trợ khi có cơ hội phù hợp không?</label>
-            <textarea rows={2} placeholder="Chia sẻ riêng của em (nếu có)..." value={sharingData.private_family_note} onChange={e => { setSharingData({ ...sharingData, private_family_note: e.target.value }); setSharingSaved(false); }} className="w-full p-2 border rounded-xl" />
-          </div>
-
-          <button type="submit" disabled={sharingSaving} className="w-full py-2.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-xl shadow transition">
-            {sharingSaving ? 'Đang gửi...' : sharingSaved ? '✓ Đã Gửi — Bấm Để Cập Nhật Lại' : 'Gửi Góc Chia Sẻ Này Cho Thầy/Cô'}
-          </button>
-        </form>
       </div>
 
       <div className="bg-white p-5 rounded-2xl border shadow-sm space-y-3">
@@ -1573,7 +1084,7 @@ function StudentPortal({ student, sessionToken, onRefreshStudent }: { student: S
 }
 
 // ==================== 4. CỔNG BÁO CÁO DÀNH CHO LỚP TRƯỞNG ====================
-function ClassLeaderPortal({ student, sessionToken, onSwitchToStudentView }: { student: Student; sessionToken: string; onSwitchToStudentView: () => void }) {
+function ClassLeaderPortal({ student, onSwitchToStudentView }: { student: Student; onSwitchToStudentView: () => void }) {
   const [classStudents, setClassStudents] = useState<Student[]>([]);
   const [weekNumber, setWeekNumber] = useState<number>(1);
   const [recordDate, setRecordDate] = useState<string>(new Date().toISOString().slice(0, 10));
@@ -1589,67 +1100,19 @@ function ClassLeaderPortal({ student, sessionToken, onSwitchToStudentView }: { s
 
   const [groupScores, setGroupScores] = useState({ group1: '100', group2: '100', group3: '100', group4: '100' });
   const [leaderNote, setLeaderNote] = useState('');
-  const [scoreHistory, setScoreHistory] = useState<GroupWeeklyScore[]>([]);
-  const [classRecords, setClassRecords] = useState<StudentRecord[]>([]);
-  // Khi khác null: đang SỬA bản ghi này (thay vì thêm mới) — form phía trên
-  // dùng chung, chỉ đổi hành vi submit và nhãn nút.
-  const [editingRecordId, setEditingRecordId] = useState<string | null>(null);
 
   useEffect(() => {
     fetchClassData();
-  }, [student.id, sessionToken]);
+  }, [student.id]);
 
-  // Đọc qua RPC get_class_students / get_class_group_weekly_scores /
-  // leader_get_class_records thay vì đọc trực tiếp bảng — đảm bảo Lớp
-  // trưởng chỉ thấy đúng dữ liệu lớp mình.
   const fetchClassData = async () => {
-    const [stRes, gsRes, recRes] = await Promise.all([
-      supabase.rpc('get_class_students', { p_session_token: sessionToken }).order('code', { ascending: true }),
-      supabase.rpc('get_class_group_weekly_scores', { p_session_token: sessionToken }).order('week_number', { ascending: true }),
-      supabase.rpc('leader_get_class_records', { p_session_token: sessionToken }).order('week_number', { ascending: false }),
-    ]);
+    const { data, error } = await supabase
+      .from('students')
+      .select('*')
+      .eq('teacher_id', student.teacher_id)
+      .order('code', { ascending: true });
 
-    if (stRes.error) console.error('Lỗi tải danh sách lớp:', stRes.error.message);
-    if (gsRes.error) console.error('Lỗi tải điểm thi đua Tổ:', gsRes.error.message);
-    if (recRes.error) console.error('Lỗi tải nhật ký vi phạm/khen thưởng:', recRes.error.message);
-
-    if (stRes.data) setClassStudents(stRes.data as Student[]);
-    if (gsRes.data) setScoreHistory(gsRes.data as GroupWeeklyScore[]);
-    if (recRes.data) setClassRecords(recRes.data as StudentRecord[]);
-  };
-
-  // Đưa dữ liệu 1 bản ghi có sẵn lên form phía trên để sửa.
-  const handleStartEditRecord = (r: StudentRecord) => {
-    setEditingRecordId(r.id);
-    setSelectedStudentId(r.student_id);
-    setWeekNumber(r.week_number);
-    setRecordDate(r.record_date || new Date().toISOString().slice(0, 10));
-    setRecordType(r.type);
-    const matchedRule = COMPETITION_RULES.find(rule => rule.type === r.type && rule.content === r.content);
-    if (matchedRule) {
-      setUseCustomContent(false);
-      setContent(r.content);
-    } else {
-      setUseCustomContent(true);
-      setContent(r.content);
-    }
-    setPointsStr(String(r.points));
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
-
-  const handleCancelEditRecord = () => {
-    setEditingRecordId(null);
-    setContent('');
-    setPointsStr('1');
-    setUseCustomContent(false);
-  };
-
-  const handleDeleteRecord = async (id: string) => {
-    if (!confirm('Xóa bản ghi này?')) return;
-    const { error } = await supabase.rpc('leader_delete_record', { p_session_token: sessionToken, p_record_id: id });
-    if (error) { alert('Lỗi xóa: ' + error.message); return; }
-    if (editingRecordId === id) handleCancelEditRecord();
-    fetchClassData();
+    if (!error && data) setClassStudents(data as Student[]);
   };
 
   // Xử lý khi lớp trưởng chọn 1 nội dung trong dropdown quy định điểm
@@ -1674,32 +1137,8 @@ function ClassLeaderPortal({ student, sessionToken, onSwitchToStudentView }: { s
     }
     const parsedPoints = parseInt(pointsStr, 10) || 1;
 
-    if (editingRecordId) {
-      // Đang SỬA 1 bản ghi có sẵn.
-      const { error } = await supabase.rpc('leader_update_record', {
-        p_session_token: sessionToken,
-        p_record_id: editingRecordId,
-        p_week_number: weekNumber,
-        p_record_date: recordDate,
-        p_type: recordType,
-        p_content: content.trim(),
-        p_points: parsedPoints,
-      });
-      if (!error) {
-        alert('Đã cập nhật bản ghi thành công!');
-        handleCancelEditRecord();
-        fetchClassData();
-      } else {
-        alert('Lỗi khi cập nhật: ' + error.message);
-      }
-      return;
-    }
-
-    // Gọi hàm _secure (dùng session token) thay vì hàm gốc leader_add_record
-    // (hàm gốc vẫn tồn tại nhưng chỉ hàm _secure mới được phép gọi trực tiếp
-    // từ client sau khi khóa lại ở Phần F của migration_5_session_token.sql).
-    const { error } = await supabase.rpc('leader_add_record_secure', {
-      p_session_token: sessionToken,
+    const { error } = await supabase.rpc('leader_add_record', {
+      p_leader_student_id: student.id,
       p_target_student_id: selectedStudentId,
       p_week_number: weekNumber,
       p_record_date: recordDate,
@@ -1713,7 +1152,6 @@ function ClassLeaderPortal({ student, sessionToken, onSwitchToStudentView }: { s
       setContent('');
       setPointsStr('1');
       setUseCustomContent(false);
-      fetchClassData();
     } else {
       alert('Lỗi khi lưu điểm: ' + error.message);
     }
@@ -1729,41 +1167,20 @@ function ClassLeaderPortal({ student, sessionToken, onSwitchToStudentView }: { s
     const title = `[THI ĐUA LỚP TUẦN ${weekNumber}]`;
     const summaryText = `📊 BÁO CÁO THI ĐUA TỔ TUẦN ${weekNumber}:\n- Tổ 1: ${g1}đ | Tổ 2: ${g2}đ\n- Tổ 3: ${g3}đ | Tổ 4: ${g4}đ\n\n📝 Ghi chú Lớp trưởng: ${leaderNote || 'Không có'}`;
 
-    // Gọi hàm _secure (dùng session token) thay vì hàm gốc leader_submit_weekly_report.
-    const { error } = await supabase.rpc('leader_submit_weekly_report_secure', {
-      p_session_token: sessionToken,
+    const { error } = await supabase.rpc('leader_submit_weekly_report', {
+      p_leader_student_id: student.id,
       p_week_number: weekNumber,
       p_title: title,
       p_content: summaryText,
     });
 
-    if (error) {
-      alert('Lỗi nộp báo cáo: ' + error.message);
-      return;
-    }
-
-    // Lưu điểm từng Tổ vào bảng có cấu trúc (group_weekly_scores) để GVCN và cả lớp
-    // xem được dưới dạng bảng rõ ràng theo từng tuần, thay vì chỉ nằm trong văn bản thông báo.
-    const { error: scoreErr } = await supabase.rpc('leader_submit_group_scores', {
-      p_session_token: sessionToken,
-      p_week_number: weekNumber,
-      p_group1: g1,
-      p_group2: g2,
-      p_group3: g3,
-      p_group4: g4,
-      p_note: leaderNote || null,
-    });
-
-    if (scoreErr) {
-      alert('Đã gửi thông báo nhưng lỗi khi lưu bảng điểm Tổ: ' + scoreErr.message);
-    } else {
+    if (!error) {
       alert('Đã gửi báo cáo thi đua tuần tới Giáo viên chủ nhiệm!');
+      setLeaderNote('');
+    } else {
+      alert('Lỗi nộp báo cáo: ' + error.message);
     }
-    setLeaderNote('');
-    fetchClassData();
   };
-
-  const weeksWithScores = [...new Set(scoreHistory.map(s => s.week_number))].sort((a, b) => a - b);
 
   return (
     <div className="max-w-5xl mx-auto p-6 space-y-6 text-xs font-sans">
@@ -1869,48 +1286,10 @@ function ClassLeaderPortal({ student, sessionToken, onSwitchToStudentView }: { s
               )}
             </div>
 
-            <div className="flex gap-2">
-              <button type="submit" className={`flex-1 py-2.5 text-white font-bold rounded-xl shadow transition ${editingRecordId ? 'bg-amber-600 hover:bg-amber-700' : 'bg-indigo-600 hover:bg-indigo-700'}`}>
-                {editingRecordId ? 'Cập Nhật Bản Ghi' : 'Lưu Điểm Cho Học Sinh'}
-              </button>
-              {editingRecordId && (
-                <button type="button" onClick={handleCancelEditRecord} className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition">
-                  Hủy Sửa
-                </button>
-              )}
-            </div>
+            <button type="submit" className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow transition">
+              Lưu Điểm Cho Học Sinh
+            </button>
           </form>
-
-          <div className="pt-3 border-t">
-            <h3 className="font-bold text-slate-700 mb-2">Nhật Ký Đã Nhập (Sửa / Xóa)</h3>
-            {classRecords.length === 0 ? (
-              <p className="text-slate-400 italic">Chưa có bản ghi nào.</p>
-            ) : (
-              <div className="max-h-72 overflow-y-auto space-y-1.5">
-                {classRecords.map(r => {
-                  const st = classStudents.find(s => s.id === r.student_id);
-                  return (
-                    <div key={r.id} className={`flex items-center justify-between gap-2 p-2 rounded-xl border ${r.type === 'violation' ? 'bg-rose-50/60 border-rose-200' : 'bg-emerald-50/60 border-emerald-200'}`}>
-                      <div className="flex-1 min-w-0">
-                        <span className="font-bold">{st?.full_name || '(HS đã xóa)'}</span>
-                        <span className="text-slate-500"> • Tuần {r.week_number} {r.record_date ? `• ${r.record_date}` : ''} • </span>
-                        <span className={r.type === 'violation' ? 'text-rose-600 font-bold' : 'text-emerald-600 font-bold'}>
-                          {r.type === 'violation' ? `-${r.points}` : `+${r.points}`}đ
-                        </span>
-                        <p className="text-slate-600 truncate">{r.content}</p>
-                      </div>
-                      <div className="flex gap-1 shrink-0">
-                        <button type="button" onClick={() => handleStartEditRecord(r)} className="bg-indigo-50 text-indigo-700 border border-indigo-200 px-2 py-1 rounded-lg font-bold hover:bg-indigo-100">Sửa</button>
-                        <button type="button" onClick={() => handleDeleteRecord(r.id)} className="p-1.5 text-rose-600 hover:bg-rose-50 rounded">
-                          <Trash2 className="w-4 h-4 inline" />
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
         </div>
 
         <div className="bg-white p-5 rounded-2xl border shadow-sm space-y-4">
@@ -1968,357 +1347,6 @@ function ClassLeaderPortal({ student, sessionToken, onSwitchToStudentView }: { s
               Gửi Báo Cáo Thi Đua Lớp
             </button>
           </form>
-
-          {weeksWithScores.length > 0 && (
-            <div className="pt-3 border-t">
-              <h3 className="font-bold text-slate-700 mb-2">Lịch Sử Điểm Thi Đua Các Tổ Đã Gửi</h3>
-              <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse">
-                  <thead className="bg-slate-50 font-bold border-b text-slate-700">
-                    <tr>
-                      <th className="p-2 border-r text-center">Tuần</th>
-                      <th className="p-2 border-r text-center">Tổ 1</th>
-                      <th className="p-2 border-r text-center">Tổ 2</th>
-                      <th className="p-2 border-r text-center">Tổ 3</th>
-                      <th className="p-2 text-center">Tổ 4</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y">
-                    {weeksWithScores.map(week => (
-                      <tr key={week} className="hover:bg-slate-50">
-                        <td className="p-2 border-r text-center font-bold">{week}</td>
-                        {[1, 2, 3, 4].map(g => {
-                          const row = scoreHistory.find(s => s.week_number === week && s.group_number === g);
-                          return <td key={g} className="p-2 border-r last:border-r-0 text-center font-bold text-indigo-700">{row ? row.score : '—'}</td>;
-                        })}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ==================== 4b. CỔNG QUẢN LÝ QUỸ LỚP DÀNH CHO THỦ QUỸ ====================
-function TreasurerPortal({ student, sessionToken, onSwitchToStudentView }: { student: Student; sessionToken: string; onSwitchToStudentView: () => void }) {
-  const [classStudents, setClassStudents] = useState<Student[]>([]);
-  const [feeItems, setFeeItems] = useState<FeeItem[]>([]);
-  const [feePayments, setFeePayments] = useState<FeePayment[]>([]);
-  const [feeExpenses, setFeeExpenses] = useState<FeeExpense[]>([]);
-
-  const [feeTitle, setFeeTitle] = useState('');
-  const [feeAmount, setFeeAmount] = useState('');
-  const [feeDeadline, setFeeDeadline] = useState('');
-
-  const [selectedFeeItemId, setSelectedFeeItemId] = useState('');
-
-  const [expTitle, setExpTitle] = useState('');
-  const [expAmount, setExpAmount] = useState('');
-  const [expDate, setExpDate] = useState(new Date().toISOString().slice(0, 10));
-  const [expNote, setExpNote] = useState('');
-
-  useEffect(() => {
-    fetchAll();
-  }, [student.id, sessionToken]);
-
-  // Đọc qua RPC get_class_* thay vì đọc trực tiếp bảng — đảm bảo Thủ quỹ
-  // chỉ thấy đúng dữ liệu lớp mình.
-  const fetchAll = async () => {
-    const [stRes, feeRes, expRes] = await Promise.all([
-      supabase.rpc('get_class_students', { p_session_token: sessionToken }).order('code', { ascending: true }),
-      supabase.rpc('get_class_fee_items', { p_session_token: sessionToken }),
-      supabase.rpc('get_class_fee_expenses', { p_session_token: sessionToken }).order('expense_date', { ascending: false }),
-    ]);
-
-    if (stRes.error) console.error('Lỗi tải danh sách lớp:', stRes.error.message);
-    if (feeRes.error) console.error('Lỗi tải khoản thu:', feeRes.error.message);
-    if (expRes.error) console.error('Lỗi tải khoản chi:', expRes.error.message);
-
-    if (stRes.data) setClassStudents(stRes.data as Student[]);
-    if (feeRes.data) {
-      setFeeItems(feeRes.data as FeeItem[]);
-      const { data: payData } = await supabase.rpc('get_class_fee_payments', { p_session_token: sessionToken });
-      if (payData) setFeePayments(payData as FeePayment[]);
-    }
-    if (expRes.data) setFeeExpenses(expRes.data as FeeExpense[]);
-  };
-
-  const handleAddFeeItem = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!feeTitle.trim() || !feeAmount) {
-      alert('Vui lòng nhập đầy đủ Nội dung khoản thu và Số tiền!');
-      return;
-    }
-    const { error } = await supabase.rpc('treasurer_add_fee_item', {
-      p_session_token: sessionToken,
-      p_title: feeTitle.trim(),
-      p_amount: Number(feeAmount),
-      p_deadline: feeDeadline || null,
-    });
-    if (error) {
-      alert('Lỗi tạo khoản thu: ' + error.message);
-      return;
-    }
-    setFeeTitle(''); setFeeAmount(''); setFeeDeadline('');
-    fetchAll();
-  };
-
-  const handleTogglePayment = async (targetStudentId: string, feeItemId: string, currentStatus: boolean) => {
-    const { error } = await supabase.rpc('treasurer_toggle_payment', {
-      p_session_token: sessionToken,
-      p_target_student_id: targetStudentId,
-      p_fee_item_id: feeItemId,
-      p_is_paid: !currentStatus,
-    });
-    if (error) {
-      alert('Lỗi cập nhật trạng thái nộp tiền: ' + error.message);
-      return;
-    }
-    fetchAll();
-  };
-
-  // Đánh dấu 1 khoản thu là "Đã Xong" (đã thu đủ / kết thúc đợt thu) hoặc mở lại "Đang thu"
-  const handleToggleFeeCompleted = async (feeItemId: string, currentStatus: boolean) => {
-    const { error } = await supabase.rpc('treasurer_toggle_fee_completed', {
-      p_session_token: sessionToken,
-      p_fee_item_id: feeItemId,
-      p_is_completed: !currentStatus,
-    });
-    if (error) {
-      alert('Lỗi cập nhật trạng thái khoản thu: ' + error.message);
-      return;
-    }
-    fetchAll();
-  };
-
-  // Xóa hẳn 1 khoản thu (xóa luôn các lượt đã tick nộp tiền liên quan)
-  const handleDeleteFeeItem = async (feeItemId: string) => {
-    if (!confirm('Xóa khoản thu này? Toàn bộ trạng thái đã nộp/chưa nộp của khoản thu này cũng sẽ bị xóa.')) return;
-    const { error } = await supabase.rpc('treasurer_delete_fee_item', {
-      p_session_token: sessionToken,
-      p_fee_item_id: feeItemId,
-    });
-    if (error) {
-      alert('Lỗi xóa khoản thu: ' + error.message);
-      return;
-    }
-    if (selectedFeeItemId === feeItemId) setSelectedFeeItemId('');
-    fetchAll();
-  };
-
-  // Xóa hẳn 1 khoản chi
-  const handleDeleteExpense = async (expenseId: string) => {
-    if (!confirm('Xóa khoản chi này?')) return;
-    const { error } = await supabase.rpc('treasurer_delete_expense', {
-      p_session_token: sessionToken,
-      p_expense_id: expenseId,
-    });
-    if (error) {
-      alert('Lỗi xóa khoản chi: ' + error.message);
-      return;
-    }
-    fetchAll();
-  };
-
-  const handleAddExpense = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!expTitle.trim() || !expAmount) {
-      alert('Vui lòng nhập đầy đủ Nội dung chi và Số tiền!');
-      return;
-    }
-    const { error } = await supabase.rpc('treasurer_add_expense', {
-      p_session_token: sessionToken,
-      p_title: expTitle.trim(),
-      p_amount: Number(expAmount),
-      p_expense_date: expDate,
-      p_note: expNote.trim() || null,
-    });
-    if (error) {
-      alert('Lỗi ghi nhận khoản chi: ' + error.message);
-      return;
-    }
-    setExpTitle(''); setExpAmount(''); setExpNote('');
-    fetchAll();
-  };
-
-  const totalCollected = feeItems.reduce((sum, item) => {
-    const paidCount = feePayments.filter(p => p.fee_item_id === item.id && p.is_paid).length;
-    return sum + Number(item.amount) * paidCount;
-  }, 0);
-  const totalExpense = feeExpenses.reduce((sum, e) => sum + Number(e.amount), 0);
-  const fundBalance = totalCollected - totalExpense;
-
-  return (
-    <div className="max-w-5xl mx-auto p-6 space-y-6 text-xs font-sans">
-      <div className="bg-emerald-700 text-white p-5 rounded-2xl shadow-lg flex justify-between items-center flex-wrap gap-3">
-        <div>
-          <span className="bg-emerald-600 border border-emerald-400 px-2.5 py-1 rounded text-[11px] font-bold uppercase">THỦ QUỸ PORTAL</span>
-          <h1 className="text-xl font-bold mt-1">Cổng Quản Lý Quỹ Lớp - Thủ Quỹ: {student.full_name}</h1>
-        </div>
-        <button onClick={onSwitchToStudentView} className="bg-white text-emerald-900 px-3.5 py-2 rounded-xl font-bold hover:bg-emerald-50 shadow transition">
-          👁️ Xem Trang Cá Nhân Học Sinh
-        </button>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-        <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 text-center">
-          <span className="text-[10px] text-emerald-700 font-bold uppercase block">Tổng Đã Thu</span>
-          <span className="text-xl font-black text-emerald-700">{totalCollected.toLocaleString()} đ</span>
-        </div>
-        <div className="bg-rose-50 border border-rose-200 rounded-2xl p-4 text-center">
-          <span className="text-[10px] text-rose-700 font-bold uppercase block">Tổng Đã Chi</span>
-          <span className="text-xl font-black text-rose-700">{totalExpense.toLocaleString()} đ</span>
-        </div>
-        <div className="bg-indigo-50 border border-indigo-200 rounded-2xl p-4 text-center">
-          <span className="text-[10px] text-indigo-700 font-bold uppercase block">Quỹ Lớp Còn Lại</span>
-          <span className="text-xl font-black text-indigo-700">{fundBalance.toLocaleString()} đ</span>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div className="bg-white p-5 rounded-2xl border shadow-sm space-y-4">
-          <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2 border-b pb-2">
-            <Coins className="w-4 h-4 text-emerald-600" /> Tạo Khoản Thu Mới
-          </h2>
-          <form onSubmit={handleAddFeeItem} className="space-y-3">
-            <div>
-              <label className="font-semibold block mb-1">Nội dung khoản thu (*):</label>
-              <input type="text" required placeholder="VD: Quỹ lớp học kỳ 1" value={feeTitle} onChange={e => setFeeTitle(e.target.value)} className="w-full p-2 border rounded-xl" />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="font-semibold block mb-1">Số tiền / học sinh (*):</label>
-                <input type="number" required placeholder="VD: 100000" value={feeAmount} onChange={e => setFeeAmount(e.target.value)} className="w-full p-2 border rounded-xl" />
-              </div>
-              <div>
-                <label className="font-semibold block mb-1">Hạn nộp:</label>
-                <input type="date" value={feeDeadline} onChange={e => setFeeDeadline(e.target.value)} className="w-full p-2 border rounded-xl" />
-              </div>
-            </div>
-            <button type="submit" className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow transition">
-              Tạo Khoản Thu
-            </button>
-          </form>
-
-          <div className="pt-3 border-t space-y-2">
-            <label className="font-semibold block">Danh sách khoản thu:</label>
-            {feeItems.length === 0 ? (
-              <p className="text-slate-400 italic">Chưa có khoản thu nào.</p>
-            ) : (
-              <div className="space-y-1.5">
-                {feeItems.map(f => (
-                  <div key={f.id} className={`flex items-center gap-2 p-2 rounded-xl border ${f.is_completed ? 'bg-slate-100 border-slate-200' : 'bg-white'}`}>
-                    <button
-                      type="button"
-                      onClick={() => setSelectedFeeItemId(f.id)}
-                      className={`flex-1 text-left ${selectedFeeItemId === f.id ? 'font-black text-emerald-700' : 'font-semibold text-slate-700'}`}
-                    >
-                      {f.title} <span className="text-slate-500 font-normal">({Number(f.amount).toLocaleString()} đ)</span>
-                      {f.is_completed && <span className="ml-1.5 text-[10px] bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded-full font-bold">✅ Đã Xong</span>}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleToggleFeeCompleted(f.id, !!f.is_completed)}
-                      className={`text-[11px] px-2 py-1 rounded-lg font-bold ${f.is_completed ? 'bg-amber-50 text-amber-700 border border-amber-200' : 'bg-emerald-50 text-emerald-700 border border-emerald-200'}`}
-                    >
-                      {f.is_completed ? 'Mở Lại' : '✔ Đã Xong'}
-                    </button>
-                    <button type="button" onClick={() => handleDeleteFeeItem(f.id)} className="p-1.5 text-rose-600 hover:bg-rose-50 rounded">
-                      <Trash2 className="w-4 h-4 inline" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {selectedFeeItemId && (
-              <div className="space-y-1.5">
-                <p className="text-[11px] text-slate-500 italic">Tick chọn học sinh đã nộp cho khoản thu: <strong>{feeItems.find(f => f.id === selectedFeeItemId)?.title}</strong></p>
-              <div className="max-h-72 overflow-y-auto border rounded-xl divide-y">
-                {classStudents.map(s => {
-                  const pay = feePayments.find(p => p.student_id === s.id && p.fee_item_id === selectedFeeItemId);
-                  const isPaid = pay?.is_paid || false;
-                  return (
-                    <label key={s.id} className={`flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-slate-50 ${isPaid ? 'bg-emerald-50' : ''}`}>
-                      <input
-                        type="checkbox"
-                        checked={isPaid}
-                        onChange={() => handleTogglePayment(s.id, selectedFeeItemId, isPaid)}
-                        className="w-4 h-4 accent-emerald-600"
-                      />
-                      <span className="flex-1">
-                        <span className="font-mono text-indigo-700 font-bold mr-1">{s.code}</span>
-                        {s.full_name}
-                      </span>
-                      {isPaid ? (
-                        <span className="text-[10px] bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full font-bold">Đã nộp</span>
-                      ) : (
-                        <span className="text-[10px] bg-rose-100 text-rose-800 px-2 py-0.5 rounded-full font-bold">Chưa nộp</span>
-                      )}
-                    </label>
-                  );
-                })}
-                {classStudents.length === 0 && <p className="p-3 text-slate-400 italic">Lớp chưa có học sinh nào.</p>}
-              </div>
-              </div>
-            )}
-          </div>
-        </div>
-
-        <div className="bg-white p-5 rounded-2xl border shadow-sm space-y-4">
-          <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2 border-b pb-2">
-            <Receipt className="w-4 h-4 text-rose-600" /> Ghi Nhận Khoản Chi Ra
-          </h2>
-          <form onSubmit={handleAddExpense} className="space-y-3">
-            <div>
-              <label className="font-semibold block mb-1">Nội dung chi (*):</label>
-              <input type="text" required placeholder="VD: Mua hoa 20/11, in tài liệu..." value={expTitle} onChange={e => setExpTitle(e.target.value)} className="w-full p-2 border rounded-xl" />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="font-semibold block mb-1">Số tiền (*):</label>
-                <input type="number" required placeholder="VD: 200000" value={expAmount} onChange={e => setExpAmount(e.target.value)} className="w-full p-2 border rounded-xl" />
-              </div>
-              <div>
-                <label className="font-semibold block mb-1">Ngày chi (*):</label>
-                <input type="date" required value={expDate} onChange={e => setExpDate(e.target.value)} className="w-full p-2 border rounded-xl" />
-              </div>
-            </div>
-            <div>
-              <label className="font-semibold block mb-1">Ghi chú:</label>
-              <input type="text" placeholder="Ghi chú thêm (nếu có)" value={expNote} onChange={e => setExpNote(e.target.value)} className="w-full p-2 border rounded-xl" />
-            </div>
-            <button type="submit" className="w-full py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl shadow transition">
-              Ghi Nhận Khoản Chi
-            </button>
-          </form>
-
-          <div className="pt-3 border-t">
-            <h3 className="font-bold text-slate-700 mb-2">Lịch Sử Các Khoản Đã Chi</h3>
-            {feeExpenses.length === 0 ? (
-              <p className="text-slate-400 italic">Chưa có khoản chi nào.</p>
-            ) : (
-              <div className="max-h-72 overflow-y-auto space-y-2">
-                {feeExpenses.map(e => (
-                  <div key={e.id} className="p-2.5 bg-rose-50/60 border border-rose-200 rounded-xl flex justify-between items-center gap-2">
-                    <div className="flex-1">
-                      <span className="font-bold text-slate-800">{e.title}</span>
-                      <p className="text-[11px] text-slate-500">📅 {e.expense_date} {e.note ? `• ${e.note}` : ''}</p>
-                    </div>
-                    <span className="font-black text-rose-700 whitespace-nowrap">-{Number(e.amount).toLocaleString()} đ</span>
-                    <button type="button" onClick={() => handleDeleteExpense(e.id)} className="p-1.5 text-rose-600 hover:bg-rose-100 rounded">
-                      <Trash2 className="w-4 h-4 inline" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
         </div>
       </div>
     </div>
@@ -2326,467 +1354,16 @@ function TreasurerPortal({ student, sessionToken, onSwitchToStudentView }: { stu
 }
 
 // ==================== 5. BẢNG ĐIỀU KHIỂN GIÁO VIÊN CHỦ NHIỆM ====================
-// ==================== TAB ĐIỂM MIỆNG (BẤT KỲ LỚP DẠY NÀO) ====================
-function OralGradesTab({ teacher }: { teacher: Teacher }) {
-  const [classes, setClasses] = useState<OralGradeClass[]>([]);
-  const [selectedClassId, setSelectedClassId] = useState('');
-  const [newClassName, setNewClassName] = useState('');
-  const [students, setStudents] = useState<OralGradeStudent[]>([]);
-  const [records, setRecords] = useState<OralGradeRecord[]>([]);
-  const [bonusPoints, setBonusPoints] = useState<OralGradeBonus[]>([]);
-  const [importing, setImporting] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const [entryStudentId, setEntryStudentId] = useState('');
-  const [entryDate, setEntryDate] = useState(new Date().toISOString().slice(0, 10));
-  const [entryScore, setEntryScore] = useState('');
-
-  const [bonusStudentId, setBonusStudentId] = useState('');
-  const [bonusDate, setBonusDate] = useState(new Date().toISOString().slice(0, 10));
-  const [bonusScore, setBonusScore] = useState('');
-  const [bonusNote, setBonusNote] = useState('');
-
-  useEffect(() => { fetchClasses(); }, [teacher.id]);
-  useEffect(() => {
-    if (selectedClassId) fetchClassData();
-    else { setStudents([]); setRecords([]); setBonusPoints([]); }
-  }, [selectedClassId]);
-
-  const fetchClasses = async () => {
-    const { data, error } = await supabase.from('oral_grade_classes').select('*').eq('teacher_id', teacher.id).order('class_name', { ascending: true });
-    if (error) { console.error('Lỗi tải danh sách lớp điểm miệng:', error.message); return; }
-    if (data) {
-      setClasses(data as OralGradeClass[]);
-      if (!selectedClassId && data.length > 0) setSelectedClassId(data[0].id);
-    }
-  };
-
-  const fetchClassData = async () => {
-    const [stRes, recRes, bonusRes] = await Promise.all([
-      supabase.from('oral_grade_students').select('*').eq('class_id', selectedClassId).order('full_name', { ascending: true }),
-      supabase.from('oral_grade_records').select('*').eq('class_id', selectedClassId).order('grade_date', { ascending: false }),
-      supabase.from('oral_grade_bonus_points').select('*').eq('class_id', selectedClassId).order('bonus_date', { ascending: false }),
-    ]);
-    if (stRes.data) setStudents(stRes.data as OralGradeStudent[]);
-    if (recRes.data) setRecords(recRes.data as OralGradeRecord[]);
-    if (bonusRes.data) setBonusPoints(bonusRes.data as OralGradeBonus[]);
-  };
-
-  const handleCreateClass = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newClassName.trim()) return;
-    const { data, error } = await supabase.from('oral_grade_classes')
-      .insert([{ teacher_id: teacher.id, class_name: newClassName.trim() }])
-      .select()
-      .single();
-    if (error) { alert('Lỗi tạo lớp: ' + error.message); return; }
-    setNewClassName('');
-    await fetchClasses();
-    if (data) setSelectedClassId((data as OralGradeClass).id);
-  };
-
-  const handleDeleteClass = async (id: string) => {
-    if (!confirm('Xóa lớp này? Toàn bộ danh sách học sinh, điểm miệng và điểm cộng của lớp sẽ bị xóa theo.')) return;
-    const { error } = await supabase.from('oral_grade_classes').delete().eq('id', id);
-    if (error) { alert('Lỗi xóa lớp: ' + error.message); return; }
-    if (selectedClassId === id) setSelectedClassId('');
-    fetchClasses();
-  };
-
-  const handleChangeCalcMethod = async (method: 'average' | 'max') => {
-    const { error } = await supabase.from('oral_grade_classes').update({ calc_method: method }).eq('id', selectedClassId);
-    if (error) { alert('Lỗi cập nhật cách tính điểm: ' + error.message); return; }
-    fetchClasses();
-  };
-
-  const handleImportExcel = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !selectedClassId) return;
-    setImporting(true);
-    try {
-      const buf = await file.arrayBuffer();
-      const workbook = XLSX.read(buf, { cellDates: true });
-      const sheet = workbook.Sheets[workbook.SheetNames[0]];
-      const rows: any[] = XLSX.utils.sheet_to_json(sheet, { defval: '' });
-
-      const names = rows
-        .map(r => String(r['Họ và tên'] || r['Họ tên'] || r['Ho va ten'] || '').trim())
-        .filter(Boolean);
-
-      if (names.length === 0) {
-        alert('Không đọc được cột "Họ và tên" trong file. Kiểm tra lại tên cột trong file Excel.');
-        setImporting(false);
-        if (fileInputRef.current) fileInputRef.current.value = '';
-        return;
-      }
-
-      const payload = names.map(full_name => ({ class_id: selectedClassId, full_name }));
-      const { error } = await supabase.from('oral_grade_students').insert(payload);
-      if (error) {
-        alert('Lỗi nhập danh sách: ' + error.message);
-      } else {
-        alert(`Đã nhập ${names.length} học sinh vào lớp!`);
-        fetchClassData();
-      }
-    } catch (err: any) {
-      alert('Lỗi đọc file Excel: ' + err.message);
-    } finally {
-      setImporting(false);
-      if (fileInputRef.current) fileInputRef.current.value = '';
-    }
-  };
-
-  const handleDeleteStudent = async (id: string) => {
-    if (!confirm('Xóa học sinh này khỏi danh sách? Điểm miệng và điểm cộng đã nhập của học sinh này cũng sẽ bị xóa.')) return;
-    await supabase.from('oral_grade_students').delete().eq('id', id);
-    fetchClassData();
-  };
-
-  const handleAddRecord = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!entryStudentId || !entryDate || entryScore === '') {
-      alert('Vui lòng chọn học sinh, nhập ngày tháng và điểm.');
-      return;
-    }
-    const scoreNum = Number(entryScore);
-    if (isNaN(scoreNum) || scoreNum < 0 || scoreNum > 10) {
-      alert('Điểm phải là số từ 0 đến 10.');
-      return;
-    }
-    const { error } = await supabase.from('oral_grade_records').insert([
-      { class_id: selectedClassId, student_id: entryStudentId, grade_date: entryDate, score: scoreNum }
-    ]);
-    if (error) { alert('Lỗi lưu điểm: ' + error.message); return; }
-    setEntryScore('');
-    fetchClassData();
-  };
-
-  const handleDeleteRecord = async (id: string) => {
-    if (!confirm('Xóa điểm miệng này?')) return;
-    await supabase.from('oral_grade_records').delete().eq('id', id);
-    fetchClassData();
-  };
-
-  const handleAddBonus = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!bonusStudentId || !bonusDate || bonusScore === '') {
-      alert('Vui lòng chọn học sinh, nhập ngày tháng và số điểm cộng.');
-      return;
-    }
-    const bonusNum = Number(bonusScore);
-    if (isNaN(bonusNum) || bonusNum < 0) {
-      alert('Điểm cộng phải là số không âm.');
-      return;
-    }
-    const { error } = await supabase.from('oral_grade_bonus_points').insert([
-      { class_id: selectedClassId, student_id: bonusStudentId, bonus_date: bonusDate, points: bonusNum, note: bonusNote.trim() || null }
-    ]);
-    if (error) { alert('Lỗi lưu điểm cộng: ' + error.message); return; }
-    setBonusScore('');
-    setBonusNote('');
-    fetchClassData();
-  };
-
-  const handleDeleteBonus = async (id: string) => {
-    if (!confirm('Xóa điểm cộng này?')) return;
-    await supabase.from('oral_grade_bonus_points').delete().eq('id', id);
-    fetchClassData();
-  };
-
-  const handleExportRecords = () => {
-    const cls = classes.find(c => c.id === selectedClassId);
-    const data = records.map(r => {
-      const st = students.find(s => s.id === r.student_id);
-      return { 'Ngày': r.grade_date, 'Họ và tên': st?.full_name || '(đã xóa)', 'Điểm': r.score };
-    });
-    const ws = XLSX.utils.json_to_sheet(data);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'DiemMieng');
-    XLSX.writeFile(wb, `DiemMieng_${cls?.class_name || 'Lop'}.xlsx`);
-  };
-
-  const selectedClass = classes.find(c => c.id === selectedClassId);
-  const calcMethod: 'average' | 'max' = selectedClass?.calc_method || 'average';
-
-  // Bảng tổng hợp: gộp toàn bộ điểm miệng + điểm cộng của TỪNG học sinh lại
-  // thành 1 dòng duy nhất, để dễ thống kê thay vì phải dò trong nhật ký rời rạc.
-  // Điểm Tổng Kết = (Trung bình cộng HOẶC Điểm cao nhất, tùy lựa chọn của
-  // GVCN cho lớp này) + (Tổng Điểm Cộng ÷ 10, làm tròn xuống) — tối đa 10.
-  const studentSummaries = students.map(s => {
-    const myRecords = records.filter(r => r.student_id === s.id).sort((a, b) => a.grade_date.localeCompare(b.grade_date));
-    const scores = myRecords.map(r => r.score);
-    const average = scores.length > 0 ? scores.reduce((sum, v) => sum + v, 0) / scores.length : 0;
-    const max = scores.length > 0 ? Math.max(...scores) : 0;
-    const baseScore = calcMethod === 'max' ? max : average;
-    const totalBonus = bonusPoints.filter(b => b.student_id === s.id).reduce((sum, b) => sum + Number(b.points), 0);
-    const bonusAdd = Math.floor(totalBonus / 10);
-    const finalScore = Math.min(10, baseScore + bonusAdd);
-    return { student: s, scores, myRecords, average, max, totalBonus, bonusAdd, finalScore, count: scores.length };
-  }).sort((a, b) => a.student.full_name.localeCompare(b.student.full_name, 'vi'));
-
-  const handleExportSummary = () => {
-    const cls = classes.find(c => c.id === selectedClassId);
-    const data = studentSummaries.map(sum => ({
-      'Họ và tên': sum.student.full_name,
-      'Số lần chấm': sum.count,
-      'Các điểm đã chấm': sum.scores.join(', '),
-      [calcMethod === 'max' ? 'Điểm cao nhất' : 'Điểm trung bình']: Number((calcMethod === 'max' ? sum.max : sum.average).toFixed(2)),
-      'Tổng điểm cộng': sum.totalBonus,
-      'Điểm cộng thêm (÷10)': sum.bonusAdd,
-      'Điểm tổng kết': Number(sum.finalScore.toFixed(2)),
-    }));
-    const ws = XLSX.utils.json_to_sheet(data);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'TongHopDiemMieng');
-    XLSX.writeFile(wb, `TongHopDiemMieng_${cls?.class_name || 'Lop'}.xlsx`);
-  };
-
-  return (
-    <div className="space-y-6 text-xs font-sans">
-      <div className="bg-white p-5 rounded-2xl border shadow-sm space-y-3">
-        <div>
-          <h2 className="font-bold text-slate-800 text-sm">Quản Lý Các Lớp Dạy (Điểm Miệng)</h2>
-          <p className="text-slate-500 text-[11px] mt-1">Dùng cho bất kỳ lớp nào thầy/cô đang dạy (không nhất thiết là lớp chủ nhiệm) — mỗi lớp có danh sách học sinh riêng, nhập từ Excel.</p>
-        </div>
-        <form onSubmit={handleCreateClass} className="flex gap-2 flex-wrap">
-          <input type="text" placeholder="Nhập tên lớp (VD: 10A2, 11B1...)" value={newClassName} onChange={e => setNewClassName(e.target.value)} className="p-2 border rounded-xl flex-1 min-w-[200px]" required />
-          <button type="submit" className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-4 py-2 rounded-xl shadow">+ Tạo Lớp</button>
-        </form>
-
-        {classes.length > 0 ? (
-          <div className="flex gap-2 flex-wrap pt-2">
-            {classes.map(c => (
-              <div key={c.id} className={`flex items-center gap-1.5 pl-3 pr-2 py-1.5 rounded-xl font-bold ${selectedClassId === c.id ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-700'}`}>
-                <button type="button" onClick={() => setSelectedClassId(c.id)}>{c.class_name}</button>
-                <button type="button" onClick={() => handleDeleteClass(c.id)} className={`${selectedClassId === c.id ? 'text-white/70 hover:text-white' : 'text-rose-500 hover:text-rose-700'}`}>
-                  <Trash2 className="w-3.5 h-3.5 inline" />
-                </button>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <p className="text-slate-400 italic">Chưa có lớp nào — tạo lớp mới ở trên để bắt đầu.</p>
-        )}
-      </div>
-
-      {selectedClassId && (
-        <>
-          <div className="bg-white p-5 rounded-2xl border shadow-sm flex justify-between items-center flex-wrap gap-3">
-            <div>
-              <h2 className="font-bold text-slate-800 text-sm">Danh Sách Học Sinh — Lớp {selectedClass?.class_name}</h2>
-              <p className="text-slate-500 text-[11px] mt-1">File Excel cần có cột "Họ và tên".</p>
-            </div>
-            <div className="flex gap-2">
-              <input ref={fileInputRef} type="file" accept=".xlsx,.xls" onChange={handleImportExcel} className="hidden" id="oral-excel-import" />
-              <label htmlFor="oral-excel-import" className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl font-bold cursor-pointer shadow">
-                {importing ? 'Đang nhập...' : '📤 Đẩy Danh Sách Từ Excel'}
-              </label>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="bg-white p-5 rounded-2xl border shadow-sm space-y-3">
-              <h2 className="font-bold text-slate-800 text-sm">Nhập Điểm Miệng</h2>
-              {students.length === 0 ? (
-                <p className="text-slate-400 italic">Lớp chưa có học sinh — đẩy danh sách từ Excel ở trên trước.</p>
-              ) : (
-                <form onSubmit={handleAddRecord} className="space-y-3">
-                  <select value={entryStudentId} onChange={e => setEntryStudentId(e.target.value)} className="w-full p-2 border rounded-xl" required>
-                    <option value="">-- Chọn học sinh --</option>
-                    {students.map(s => <option key={s.id} value={s.id}>{s.full_name}</option>)}
-                  </select>
-                  <div className="grid grid-cols-2 gap-3">
-                    <input type="date" value={entryDate} onChange={e => setEntryDate(e.target.value)} className="p-2 border rounded-xl" required />
-                    <input type="number" min="0" max="10" step="0.1" placeholder="Điểm (0-10)" value={entryScore} onChange={e => setEntryScore(e.target.value)} className="p-2 border rounded-xl" required />
-                  </div>
-                  <button type="submit" className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl py-2.5 shadow">Lưu Điểm Miệng</button>
-                </form>
-              )}
-            </div>
-
-            <div className="bg-white p-5 rounded-2xl border shadow-sm space-y-3">
-              <h2 className="font-bold text-slate-800 text-sm">Nhập Điểm Cộng <span className="text-slate-400 font-normal">(cứ 10 điểm cộng = +1 điểm tổng kết)</span></h2>
-              {students.length === 0 ? (
-                <p className="text-slate-400 italic">Lớp chưa có học sinh.</p>
-              ) : (
-                <form onSubmit={handleAddBonus} className="space-y-3">
-                  <select value={bonusStudentId} onChange={e => setBonusStudentId(e.target.value)} className="w-full p-2 border rounded-xl" required>
-                    <option value="">-- Chọn học sinh --</option>
-                    {students.map(s => <option key={s.id} value={s.id}>{s.full_name}</option>)}
-                  </select>
-                  <div className="grid grid-cols-2 gap-3">
-                    <input type="date" value={bonusDate} onChange={e => setBonusDate(e.target.value)} className="p-2 border rounded-xl" required />
-                    <input type="number" min="0" step="1" placeholder="Số điểm cộng" value={bonusScore} onChange={e => setBonusScore(e.target.value)} className="p-2 border rounded-xl" required />
-                  </div>
-                  <input type="text" placeholder="Ghi chú (VD: Phát biểu xây dựng bài)" value={bonusNote} onChange={e => setBonusNote(e.target.value)} className="w-full p-2 border rounded-xl" />
-                  <button type="submit" className="w-full bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-xl py-2.5 shadow">Lưu Điểm Cộng</button>
-                </form>
-              )}
-            </div>
-          </div>
-
-          <div className="bg-white p-5 rounded-2xl border shadow-sm space-y-3">
-            <div className="flex justify-between items-center flex-wrap gap-3">
-              <div>
-                <h2 className="font-bold text-slate-800 text-sm">📊 Bảng Tổng Hợp Điểm Miệng Theo Học Sinh</h2>
-                <p className="text-slate-500 text-[11px] mt-1">Gộp toàn bộ điểm đã chấm của mỗi học sinh vào 1 dòng — dễ nhìn tổng quan và thống kê hơn nhật ký rời rạc bên dưới.</p>
-              </div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <label className="font-semibold">Cách tính điểm tổng kết:</label>
-                <select value={calcMethod} onChange={e => handleChangeCalcMethod(e.target.value as 'average' | 'max')} className="p-2 border rounded-xl font-bold">
-                  <option value="average">Trung bình cộng</option>
-                  <option value="max">Lấy điểm cao nhất</option>
-                </select>
-                <button onClick={handleExportSummary} className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-2 rounded-xl font-bold">📥 Xuất Bảng Tổng Hợp</button>
-              </div>
-            </div>
-
-            {studentSummaries.length === 0 ? (
-              <p className="text-slate-400 italic p-3">Chưa có học sinh nào trong lớp.</p>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse">
-                  <thead className="bg-slate-50 font-bold border-b text-slate-700">
-                    <tr>
-                      <th className="p-2 border-r">Họ và Tên</th>
-                      <th className="p-2 border-r">Các Điểm Đã Chấm</th>
-                      <th className="p-2 border-r text-center">{calcMethod === 'max' ? 'Điểm Cao Nhất' : 'Điểm Trung Bình'}</th>
-                      <th className="p-2 border-r text-center">Tổng Điểm Cộng</th>
-                      <th className="p-2 border-r text-center">+Điểm Cộng Thêm</th>
-                      <th className="p-2 border-r text-center">Điểm Tổng Kết</th>
-                      <th className="p-2 text-center">Thao Tác</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y">
-                    {studentSummaries.map(sum => (
-                      <tr key={sum.student.id} className="hover:bg-slate-50">
-                        <td className="p-2 border-r font-semibold">{sum.student.full_name}</td>
-                        <td className="p-2 border-r">
-                          {sum.scores.length === 0 ? (
-                            <span className="text-slate-400 italic">Chưa có điểm</span>
-                          ) : (
-                            <span className="font-mono">{sum.scores.join(', ')}</span>
-                          )}
-                          <span className="text-slate-400"> ({sum.count} lần)</span>
-                        </td>
-                        <td className="p-2 border-r text-center font-bold text-indigo-700">
-                          {sum.scores.length === 0 ? '—' : (calcMethod === 'max' ? sum.max : sum.average.toFixed(2))}
-                        </td>
-                        <td className="p-2 border-r text-center font-bold text-amber-700">{sum.totalBonus}</td>
-                        <td className="p-2 border-r text-center font-bold text-amber-700">+{sum.bonusAdd}</td>
-                        <td className="p-2 border-r text-center font-black text-emerald-700 text-sm">{sum.finalScore.toFixed(2)}</td>
-                        <td className="p-2 text-center">
-                          <button onClick={() => handleDeleteStudent(sum.student.id)} className="p-1.5 text-rose-600 hover:bg-rose-50 rounded">
-                            <Trash2 className="w-4 h-4 inline" />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-
-          <div className="bg-white p-5 rounded-2xl border shadow-sm space-y-3">
-            <div className="flex justify-between items-center flex-wrap gap-3">
-              <h2 className="font-bold text-slate-800 text-sm">Nhật Ký Chi Tiết Từng Lượt Chấm Điểm Miệng</h2>
-              <button onClick={handleExportRecords} className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-2 rounded-xl font-bold">📥 Xuất Excel</button>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse">
-                <thead className="bg-slate-50 font-bold border-b text-slate-700">
-                  <tr>
-                    <th className="p-2 border-r">Ngày Tháng</th>
-                    <th className="p-2 border-r">Họ và Tên</th>
-                    <th className="p-2 border-r text-center">Điểm</th>
-                    <th className="p-2 text-center">Thao Tác</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y">
-                  {records.map(r => {
-                    const st = students.find(s => s.id === r.student_id);
-                    return (
-                      <tr key={r.id} className="hover:bg-slate-50">
-                        <td className="p-2 border-r font-mono">{r.grade_date}</td>
-                        <td className="p-2 border-r font-semibold">{st?.full_name || '(đã xóa)'}</td>
-                        <td className="p-2 border-r text-center font-bold text-indigo-700">{r.score}</td>
-                        <td className="p-2 text-center">
-                          <button onClick={() => handleDeleteRecord(r.id)} className="p-1.5 text-rose-600 hover:bg-rose-50 rounded">
-                            <Trash2 className="w-4 h-4 inline" />
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-              {records.length === 0 && <p className="text-slate-400 italic p-3">Chưa có điểm miệng nào được nhập.</p>}
-            </div>
-          </div>
-
-          <div className="bg-white p-5 rounded-2xl border shadow-sm space-y-3">
-            <h2 className="font-bold text-slate-800 text-sm">Nhật Ký Điểm Cộng Đã Nhập</h2>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse">
-                <thead className="bg-slate-50 font-bold border-b text-slate-700">
-                  <tr>
-                    <th className="p-2 border-r">Ngày Tháng</th>
-                    <th className="p-2 border-r">Họ và Tên</th>
-                    <th className="p-2 border-r text-center">Điểm Cộng</th>
-                    <th className="p-2 border-r">Ghi Chú</th>
-                    <th className="p-2 text-center">Thao Tác</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y">
-                  {bonusPoints.map(b => {
-                    const st = students.find(s => s.id === b.student_id);
-                    return (
-                      <tr key={b.id} className="hover:bg-slate-50">
-                        <td className="p-2 border-r font-mono">{b.bonus_date}</td>
-                        <td className="p-2 border-r font-semibold">{st?.full_name || '(đã xóa)'}</td>
-                        <td className="p-2 border-r text-center font-bold text-amber-700">+{b.points}</td>
-                        <td className="p-2 border-r text-slate-500 italic">{b.note || '—'}</td>
-                        <td className="p-2 text-center">
-                          <button onClick={() => handleDeleteBonus(b.id)} className="p-1.5 text-rose-600 hover:bg-rose-50 rounded">
-                            <Trash2 className="w-4 h-4 inline" />
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-              {bonusPoints.length === 0 && <p className="text-slate-400 italic p-3">Chưa có điểm cộng nào được nhập.</p>}
-            </div>
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
-
-
 function TeacherDashboard({ teacher }: { teacher: Teacher }) {
-  const [activeTab, setActiveTab] = useState<'students' | 'fees' | 'announcements' | 'reports' | 'groups' | 'rules' | 'oral_grades'>('students');
+  const [activeTab, setActiveTab] = useState<'students' | 'fees' | 'announcements' | 'reports' | 'groups'>('students');
   const [students, setStudents] = useState<Student[]>([]);
   const [feeItems, setFeeItems] = useState<FeeItem[]>([]);
-  const [resetRequests, setResetRequests] = useState<{ id: string; student_code: string; full_name: string; note?: string; created_at: string }[]>([]);
-  // Modal CẤP MẬT KHẨU RIÊNG — gọn, chỉ 1 ô mật khẩu, dùng chung cho cả
-  // trường hợp bấm từ banner "Yêu Cầu Cấp Lại Mật Khẩu" lẫn bấm trực tiếp
-  // từ danh sách học sinh (thay vì phải mở cả form Sửa Học Sinh đầy đủ).
-  const [resetPasswordTarget, setResetPasswordTarget] = useState<Student | null>(null);
-  const [resetPasswordValue, setResetPasswordValue] = useState('');
-  const [resetPasswordSaving, setResetPasswordSaving] = useState(false);
-  const [resolvingRequestId, setResolvingRequestId] = useState<string | null>(null);
   const [feePayments, setFeePayments] = useState<FeePayment[]>([]);
-  const [feeExpenses, setFeeExpenses] = useState<FeeExpense[]>([]);
-  const [groupWeeklyScores, setGroupWeeklyScores] = useState<GroupWeeklyScore[]>([]);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [studentRecords, setStudentRecords] = useState<StudentRecord[]>([]);
   const [selectedStudentForModal, setSelectedStudentForModal] = useState<Student | null>(null);
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
-  const [editForm, setEditForm] = useState({ code: '', full_name: '', dob: '', class_role: 'Học sinh', group_number: 1 });
+  const [editForm, setEditForm] = useState({ code: '', full_name: '', dob: '', class_role: 'Học sinh', group_number: 1, password: '' });
   const [selectedWeek, setSelectedWeek] = useState<string>('all');
   const [selectedFeeForUnpaid, setSelectedFeeForUnpaid] = useState<string>('');
   const [importing, setImporting] = useState(false);
@@ -2803,11 +1380,6 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
   const [feeAmount, setFeeAmount] = useState('');
   const [feeDeadline, setFeeDeadline] = useState('');
 
-  const [expTitle, setExpTitle] = useState('');
-  const [expAmount, setExpAmount] = useState('');
-  const [expDate, setExpDate] = useState(new Date().toISOString().slice(0, 10));
-  const [expNote, setExpNote] = useState('');
-
   const [annTitle, setAnnTitle] = useState('');
   const [annContent, setAnnContent] = useState('');
   const [annImportant, setAnnImportant] = useState(false);
@@ -2817,16 +1389,12 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
   }, [teacher.id]);
 
   const fetchData = async () => {
-    const [stRes, fRes, aRes, rRes, gsRes, expRes, prRes] = await Promise.all([
+    const [stRes, fRes, aRes, rRes] = await Promise.all([
       supabase.from('students').select('*').eq('teacher_id', teacher.id).order('code', { ascending: true }),
       supabase.from('fee_items').select('*').eq('teacher_id', teacher.id),
       supabase.from('announcements').select('*').eq('teacher_id', teacher.id).order('created_date', { ascending: false }),
-      supabase.from('student_records').select('*').eq('teacher_id', teacher.id).order('week_number', { ascending: false }),
-      supabase.from('group_weekly_scores').select('*').eq('teacher_id', teacher.id).order('week_number', { ascending: true }),
-      supabase.from('fee_expenses').select('*').eq('teacher_id', teacher.id).order('expense_date', { ascending: false }),
-      supabase.from('password_reset_requests').select('*').eq('teacher_id', teacher.id).eq('is_resolved', false).order('created_at', { ascending: false }),
+      supabase.from('student_records').select('*').eq('teacher_id', teacher.id).order('week_number', { ascending: false })
     ]);
-    if (prRes.data) setResetRequests(prRes.data as any);
 
     if (stRes.data) setStudents(stRes.data as Student[]);
     if (fRes.data) {
@@ -2840,12 +1408,40 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
     }
     if (aRes.data) setAnnouncements(aRes.data as Announcement[]);
     if (rRes.data) setStudentRecords(rRes.data as StudentRecord[]);
-    if (gsRes.data) setGroupWeeklyScores(gsRes.data as GroupWeeklyScore[]);
-    if (expRes.data) setFeeExpenses(expRes.data as FeeExpense[]);
+  };
+
+  // Tìm các học sinh KHÁC đang giữ chức vụ "chỉ 1 người" (để tránh 2 Lớp phó học tập, 2 Lớp trưởng...).
+  // Tổ trưởng: chỉ xét trong cùng Tổ. Các chức vụ khác (Học sinh, Lớp phó chung...) → không xung đột.
+  const findRoleConflicts = (role: string, excludeId: string | null, groupNumber?: number): Student[] => {
+    if (role === 'Tổ trưởng') {
+      const g = groupNumber || 1;
+      return students.filter(s => s.class_role === role && (s.group_number || 1) === g && s.id !== excludeId);
+    }
+    if (!UNIQUE_CLASS_ROLES.includes(role)) return [];
+    return students.filter(s => s.class_role === role && s.id !== excludeId);
+  };
+
+  // Hỏi GV có muốn chuyển chức vụ từ người đang giữ sang học sinh mới không.
+  const confirmReplaceHolders = (role: string, holders: Student[], newName: string): boolean => {
+    const names = holders.map(h => `${h.full_name} (${h.code})`).join(', ');
+    return window.confirm(
+      `Chức vụ "${role}" hiện đang do ${names} đảm nhiệm.\n\n` +
+      `Bấm OK để chuyển chức vụ này cho ${newName} (người cũ sẽ trở về "Học sinh").\nBấm Hủy để giữ nguyên.`
+    );
   };
 
   // Hàm thay đổi chức vụ trực tiếp cho học sinh
   const handleUpdateStudentRole = async (studentId: string, newRole: string) => {
+    const target = students.find(s => s.id === studentId);
+    if (!target) return;
+    const conflicts = findRoleConflicts(newRole, studentId, target.group_number);
+    if (conflicts.length > 0) {
+      // Ô chọn là controlled theo state → khi Hủy, state không đổi nên ô tự trở về chức vụ cũ.
+      if (!confirmReplaceHolders(newRole, conflicts, target.full_name)) return;
+      await handleAssignSpecialRole(newRole, studentId, newRole === 'Tổ trưởng' ? (target.group_number || 1) : undefined, true);
+      return;
+    }
+
     const { error } = await supabase
       .from('students')
       .update({ class_role: newRole })
@@ -2861,9 +1457,6 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
   };
 
   // Hàm gán/đổi Tổ cho 1 học sinh (dùng trong tab Phân Chia Tổ & Ban Cán Sự).
-  // Mỗi học sinh chỉ thuộc DUY NHẤT 1 Tổ tại một thời điểm — khi chuyển học sinh
-  // sang Tổ mới, học sinh đó sẽ NGAY LẬP TỨC biến mất khỏi danh sách của Tổ cũ
-  // (vì mỗi cột Tổ chỉ hiển thị đúng những học sinh có group_number = số Tổ đó).
   // Nếu học sinh đang là "Tổ trưởng" của Tổ cũ mà bị chuyển sang Tổ khác,
   // tự động thu hồi chức vụ Tổ trưởng (vì Tổ trưởng gắn liền với 1 Tổ cụ thể).
   const handleAssignGroup = async (studentId: string, groupNumber: number) => {
@@ -2885,10 +1478,23 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
     )));
   };
 
-  // Hàm phân công 1 chức vụ Ban cán sự (Lớp trưởng, Bí thư, Thư ký, Thủ quỹ, Tổ trưởng) cho 1 học sinh.
+  // Hàm phân công 1 chức vụ Ban cán sự (Lớp trưởng, Lớp phó học tập, Lớp phó lao động, Bí thư, Thư ký, Thủ quỹ, Tổ trưởng) cho 1 học sinh.
   // Tự động thu hồi chức vụ của người tiền nhiệm đang giữ chức vụ đó (trong phạm vi restrictGroup nếu có,
   // dùng cho Tổ trưởng vì mỗi Tổ chỉ có 1 Tổ trưởng riêng). Truyền studentId = '' để chỉ thu hồi (bỏ trống chức vụ).
-  const handleAssignSpecialRole = async (role: string, studentId: string, restrictGroup?: number) => {
+  const handleAssignSpecialRole = async (role: string, studentId: string, restrictGroup?: number, skipRoleChangeConfirm = false) => {
+    // Mỗi học sinh chỉ giữ 1 chức vụ (cột class_role). Nếu học sinh được chọn đang giữ chức vụ khác
+    // (VD đang là Lớp trưởng mà được chọn làm Lớp phó học tập) → hỏi lại để tránh vô tình mất chức vụ cũ.
+    if (studentId && !skipRoleChangeConfirm) {
+      const picked = students.find(s => s.id === studentId);
+      const oldRole = picked?.class_role || 'Học sinh';
+      if (picked && oldRole !== 'Học sinh' && oldRole !== role) {
+        const ok = window.confirm(
+          `${picked.full_name} hiện đang là "${oldRole}".\n` +
+          `Mỗi học sinh chỉ giữ 1 chức vụ — nếu tiếp tục, ${picked.full_name} sẽ chuyển sang "${role}" và thôi giữ "${oldRole}".\n\nTiếp tục?`
+        );
+        if (!ok) return;
+      }
+    }
     const holders = students.filter(s =>
       s.class_role === role &&
       (restrictGroup ? (s.group_number || 1) === restrictGroup : true) &&
@@ -2922,6 +1528,12 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
 
   const handleAddStudent = async (e: React.FormEvent) => {
     e.preventDefault();
+    // Nếu chọn chức vụ "chỉ 1 người" mà đã có người giữ → hỏi GV trước.
+    // Thêm học sinh mới TRƯỚC, thành công rồi mới thu hồi chức vụ người cũ
+    // (tránh trường hợp thêm lỗi — VD trùng MSHS — mà người cũ đã bị mất chức vụ).
+    const conflicts = findRoleConflicts(newStudentRole, null, newStudentGroup);
+    if (conflicts.length > 0 && !confirmReplaceHolders(newStudentRole, conflicts, newStudentName.trim() || 'học sinh mới')) return;
+
     const { error } = await supabase.from('students').insert([
       {
         teacher_id: teacher.id,
@@ -2934,11 +1546,20 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
       }
     ]);
 
-    if (error) alert('Lỗi thêm học sinh: ' + error.message);
-    else {
-      setNewStudentCode(''); setNewStudentName(''); setNewStudentDob(''); setNewStudentPassword('');
-      fetchData();
+    if (error) {
+      alert('Lỗi thêm học sinh: ' + error.message);
+      return;
     }
+    if (conflicts.length > 0) {
+      const { error: resetErr } = await supabase
+        .from('students')
+        .update({ class_role: 'Học sinh' })
+        .in('id', conflicts.map(c => c.id));
+      if (resetErr) alert('Đã thêm học sinh nhưng chưa thu hồi được chức vụ của người cũ: ' + resetErr.message);
+    }
+    setNewStudentCode(''); setNewStudentName(''); setNewStudentDob(''); setNewStudentPassword('');
+    setNewStudentRole('Học sinh');
+    fetchData();
   };
 
   // Mở modal chỉnh sửa thông tin học sinh (dùng khi GV nhập sai Họ tên, Ngày sinh, MSHS...
@@ -2951,65 +1572,8 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
       dob: s.dob || '',
       class_role: s.class_role || 'Học sinh',
       group_number: s.group_number || 1,
+      password: '', // Để trống = không đổi mật khẩu hiện tại, chỉ nhập khi muốn cấp lại mật khẩu mới
     });
-  };
-
-  // Mở form CẤP MẬT KHẨU RIÊNG (gọn, chỉ 1 ô) cho đúng học sinh theo MSHS
-  // trong yêu cầu quên mật khẩu — không cần mở cả form Sửa Học Sinh đầy đủ.
-  const handleResolveFromRequest = (r: { id: string; student_code: string }) => {
-    const target = students.find(s => s.code.toUpperCase() === r.student_code.toUpperCase());
-    if (!target) {
-      alert(`Không tìm thấy học sinh có MSHS "${r.student_code}" trong danh sách lớp. Vui lòng kiểm tra lại.`);
-      return;
-    }
-    setResetPasswordTarget(target);
-    setResetPasswordValue('');
-    setResolvingRequestId(r.id);
-  };
-
-  // Bấm trực tiếp từ danh sách học sinh (không thông qua yêu cầu nào).
-  const handleOpenResetPassword = (s: Student) => {
-    setResetPasswordTarget(s);
-    setResetPasswordValue('');
-    setResolvingRequestId(null);
-  };
-
-  const handleCloseResetPassword = () => {
-    setResetPasswordTarget(null);
-    setResetPasswordValue('');
-    setResolvingRequestId(null);
-  };
-
-  const handleSaveResetPassword = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!resetPasswordTarget || !resetPasswordValue.trim()) {
-      alert('Vui lòng nhập mật khẩu mới.');
-      return;
-    }
-    setResetPasswordSaving(true);
-    const { error } = await supabase.from('students').update({ password: resetPasswordValue.trim() }).eq('id', resetPasswordTarget.id);
-
-    if (error) {
-      setResetPasswordSaving(false);
-      alert('Lỗi cấp mật khẩu: ' + error.message);
-      return;
-    }
-
-    // Nếu cấp từ 1 yêu cầu quên mật khẩu cụ thể, đánh dấu yêu cầu đó đã xử lý.
-    if (resolvingRequestId) {
-      await supabase.from('password_reset_requests').update({ is_resolved: true }).eq('id', resolvingRequestId);
-      setResetRequests(prev => prev.filter(req => req.id !== resolvingRequestId));
-    }
-
-    setResetPasswordSaving(false);
-    alert(`Đã cấp mật khẩu mới cho học sinh ${resetPasswordTarget.full_name}!`);
-    handleCloseResetPassword();
-  };
-
-  const handleDismissResetRequest = async (id: string) => {
-    const { error } = await supabase.from('password_reset_requests').update({ is_resolved: true }).eq('id', id);
-    if (error) { alert('Lỗi: ' + error.message); return; }
-    setResetRequests(prev => prev.filter(r => r.id !== id));
   };
 
   const handleCloseEditStudent = () => {
@@ -3020,8 +1584,10 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
     e.preventDefault();
     if (!editingStudent) return;
 
-    // Mật khẩu KHÔNG còn sửa ở form này nữa — dùng nút "🔑 Cấp MK" riêng
-    // (gọn, ít rủi ro nhầm lẫn hơn so với để chung trong form nhiều trường).
+    // Kiểm tra trùng chức vụ "chỉ 1 người" (Tổ trưởng: xét theo Tổ mới trong form).
+    const conflicts = findRoleConflicts(editForm.class_role, editingStudent.id, editForm.group_number);
+    if (conflicts.length > 0 && !confirmReplaceHolders(editForm.class_role, conflicts, editForm.full_name.trim() || editingStudent.full_name)) return;
+
     const updatePayload: any = {
       code: editForm.code.trim().toUpperCase(),
       full_name: editForm.full_name.trim(),
@@ -3029,11 +1595,22 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
       class_role: editForm.class_role,
       group_number: editForm.group_number,
     };
+    // Chỉ cập nhật mật khẩu nếu GV có nhập mật khẩu mới (để trống thì giữ nguyên mật khẩu cũ)
+    if (editForm.password.trim()) {
+      updatePayload.password = editForm.password.trim();
+    }
 
     const { error } = await supabase.from('students').update(updatePayload).eq('id', editingStudent.id);
     if (error) {
       alert('Lỗi cập nhật thông tin học sinh: ' + error.message);
       return;
+    }
+    if (conflicts.length > 0) {
+      const { error: resetErr } = await supabase
+        .from('students')
+        .update({ class_role: 'Học sinh' })
+        .in('id', conflicts.map(c => c.id));
+      if (resetErr) alert('Đã lưu thông tin nhưng chưa thu hồi được chức vụ của người cũ: ' + resetErr.message);
     }
     alert('Đã cập nhật thông tin học sinh thành công!');
     setEditingStudent(null);
@@ -3050,7 +1627,7 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
       const sheet = workbook.Sheets[workbook.SheetNames[0]];
       const rows: any[] = XLSX.utils.sheet_to_json(sheet, { defval: '' });
 
-      const mappedRaw = rows.map((r) => {
+      const mapped = rows.map((r) => {
         let dob = r['Ngày sinh'] || r['DOB'] || '';
         if (dob instanceof Date) dob = dob.toISOString().slice(0, 10);
         const code = String(r['MSHS'] || r['Mã số'] || '').trim().toUpperCase();
@@ -3063,49 +1640,44 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
           full_name: String(r['Họ và tên'] || r['Họ tên'] || '').trim(),
           password,
           dob: dob || null,
-          class_role: String(r['Chức vụ'] || 'Học sinh').trim() || 'Học sinh',
+          class_role: normalizeRole(r['Chức vụ']),
           group_number: Number(r['Tổ'] || r['Nhóm'] || 1) || 1,
         };
       }).filter(r => r.code && r.full_name);
 
-      if (mappedRaw.length === 0) {
+      if (mapped.length === 0) {
         alert('Không đọc được dữ liệu. Kiểm tra file có đúng cột: MSHS, Họ và tên, Ngày sinh, Chức vụ, Tổ không.');
         setImporting(false);
         return;
       }
 
-      // Loại bỏ các dòng bị trùng MSHS ngay trong file Excel (giữ lại dòng CUỐI CÙNG nếu trùng),
-      // vì Supabase upsert sẽ báo lỗi nếu trong cùng 1 lần gọi có nhiều dòng cùng khóa xung đột (teacher_id, code).
-      const dedupedMap = new Map<string, typeof mappedRaw[number]>();
-      const duplicateCodes = new Set<string>();
-      for (const row of mappedRaw) {
-        if (dedupedMap.has(row.code)) duplicateCodes.add(row.code);
-        dedupedMap.set(row.code, row);
-      }
-      const mapped = Array.from(dedupedMap.values());
-
       const { error } = await supabase.from('students').upsert(mapped, { onConflict: 'teacher_id,code' });
-
-      if (error) {
-        if (error.message.includes('duplicate key') || error.message.includes('unique constraint')) {
-          alert(
-            'Lỗi: MSHS bị trùng và không thể lưu vì ràng buộc "duy nhất" trong cơ sở dữ liệu hiện đang áp dụng trên TOÀN HỆ THỐNG (không chỉ riêng lớp của thầy/cô).\n\n' +
-            'Vui lòng liên hệ Admin/lập trình viên để cập nhật lại ràng buộc unique của bảng "students" thành (teacher_id, code) thay vì chỉ (code).'
-          );
-        } else {
-          alert('Lỗi khi nhập danh sách: ' + error.message);
-        }
-        setImporting(false);
-        if (fileInputRef.current) fileInputRef.current.value = '';
-        return;
+      if (error) alert('Lỗi khi nhập danh sách: ' + error.message);
+      else {
+        // Cảnh báo (không chặn) nếu sau khi nhập có chức vụ "chỉ 1 người" bị trùng
+        // (trùng ngay trong file, hoặc trùng với học sinh đang có trong lớp mà file không ghi đè).
+        const importedCodes = new Set(mapped.map(m => m.code));
+        const finalList = [
+          ...students.filter(s => !importedCodes.has((s.code || '').toUpperCase())),
+          ...mapped,
+        ];
+        const dupWarnings: string[] = [];
+        UNIQUE_CLASS_ROLES.forEach(role => {
+          const holders = finalList.filter(s => s.class_role === role);
+          if (holders.length > 1) dupWarnings.push(`• ${role}: ${holders.map(h => h.full_name).join(', ')}`);
+        });
+        [1, 2, 3, 4].forEach(g => {
+          const holders = finalList.filter(s => s.class_role === 'Tổ trưởng' && (s.group_number || 1) === g);
+          if (holders.length > 1) dupWarnings.push(`• Tổ trưởng Tổ ${g}: ${holders.map(h => h.full_name).join(', ')}`);
+        });
+        alert(
+          `Đã nhập thành công ${mapped.length} học sinh!` +
+          (dupWarnings.length > 0
+            ? `\n\n⚠️ Có chức vụ đang bị trùng người giữ:\n${dupWarnings.join('\n')}\n\nVui lòng vào tab Phân Chia Tổ & Ban Cán Sự để chọn lại.`
+            : '')
+        );
+        fetchData();
       }
-
-      let msg = `Đã nhập thành công ${mapped.length} học sinh!`;
-      if (duplicateCodes.size > 0) {
-        msg += `\n\n⚠️ Lưu ý: Phát hiện ${duplicateCodes.size} MSHS bị trùng trong file (${Array.from(duplicateCodes).join(', ')}) — hệ thống chỉ giữ lại dòng CUỐI CÙNG của mỗi MSHS trùng, vui lòng kiểm tra lại file gốc nếu cần.`;
-      }
-      alert(msg);
-      fetchData();
     } catch (err: any) {
       alert('Lỗi đọc file Excel: ' + err.message);
     } finally {
@@ -3113,15 +1685,13 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
+
   const handleExportStudents = () => {
-    // LƯU Ý: từ khi mật khẩu học sinh được mã hóa (bcrypt) trong cơ sở dữ liệu,
-    // cột "password" chỉ còn là chuỗi hash — KHÔNG xuất ra Excel nữa (vô nghĩa
-    // và không nên phát tán). Muốn cấp/đổi mật khẩu cho học sinh, dùng nút
-    // "Sửa" ở bảng danh sách học sinh.
     const data = students.map(s => ({
       'MSHS': s.code,
       'Họ và tên': s.full_name,
       'Ngày sinh': s.dob || '',
+      'Mật khẩu': s.password || '',
       'Chức vụ': s.class_role || 'Học sinh',
       'Tổ': s.group_number || 1,
       'Đã khảo sát': s.survey_completed ? 'Có' : 'Chưa',
@@ -3172,19 +1742,6 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
     XLSX.writeFile(wb, `NhatKyRenLuyen.xlsx`);
   };
 
-  const handleExportExpenses = () => {
-    const data = feeExpenses.map(e => ({
-      'Ngày chi': e.expense_date,
-      'Nội dung chi': e.title,
-      'Số tiền': e.amount,
-      'Ghi chú': e.note || '',
-    }));
-    const ws = XLSX.utils.json_to_sheet(data);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'ChiTieuQuyLop');
-    XLSX.writeFile(wb, `ChiTieuQuyLop.xlsx`);
-  };
-
   const handleToggleFeePayment = async (studentId: string, feeItemId: string, currentStatus: boolean) => {
     const { error } = await supabase.from('fee_payments').upsert(
       { student_id: studentId, fee_item_id: feeItemId, is_paid: !currentStatus },
@@ -3204,48 +1761,6 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
       fetchData();
     } else {
       alert('Lỗi: ' + error.message);
-    }
-  };
-
-  // Đánh dấu 1 khoản thu là "Đã Xong" (kết thúc đợt thu) hoặc mở lại "Đang thu"
-  const handleToggleFeeCompleted = async (feeItemId: string, currentStatus: boolean) => {
-    const { error } = await supabase.from('fee_items').update({ is_completed: !currentStatus }).eq('id', feeItemId);
-    if (error) alert('Lỗi cập nhật trạng thái khoản thu: ' + error.message);
-    else fetchData();
-  };
-
-  // Xóa hẳn 1 khoản thu (xóa luôn các lượt đã tick nộp tiền liên quan)
-  const handleDeleteFeeItem = async (feeItemId: string) => {
-    if (!confirm('Xóa khoản thu này? Toàn bộ trạng thái đã nộp/chưa nộp của khoản thu này cũng sẽ bị xóa.')) return;
-    const { error: payErr } = await supabase.from('fee_payments').delete().eq('fee_item_id', feeItemId);
-    if (payErr) { alert('Lỗi xóa dữ liệu nộp tiền liên quan: ' + payErr.message); return; }
-    const { error } = await supabase.from('fee_items').delete().eq('id', feeItemId);
-    if (error) { alert('Lỗi xóa khoản thu: ' + error.message); return; }
-    if (selectedFeeForUnpaid === feeItemId) setSelectedFeeForUnpaid('');
-    fetchData();
-  };
-
-  const handleAddExpense = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!expTitle.trim() || !expAmount) {
-      alert('Vui lòng nhập đầy đủ Nội dung chi và Số tiền!');
-      return;
-    }
-    const { error } = await supabase.from('fee_expenses').insert([
-      { teacher_id: teacher.id, title: expTitle.trim(), amount: Number(expAmount), expense_date: expDate, note: expNote.trim() || null }
-    ]);
-    if (!error) {
-      setExpTitle(''); setExpAmount(''); setExpNote('');
-      fetchData();
-    } else {
-      alert('Lỗi: ' + error.message);
-    }
-  };
-
-  const handleDeleteExpense = async (id: string) => {
-    if (confirm('Xóa khoản chi này?')) {
-      await supabase.from('fee_expenses').delete().eq('id', id);
-      fetchData();
     }
   };
 
@@ -3299,44 +1814,8 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
     }
   };
 
-  const totalCollectedAll = feeItems.reduce((sum, item) => {
-    const paidCount = feePayments.filter(p => p.fee_item_id === item.id && p.is_paid).length;
-    return sum + Number(item.amount) * paidCount;
-  }, 0);
-  const totalExpenseAll = feeExpenses.reduce((sum, e) => sum + Number(e.amount), 0);
-  const fundBalanceAll = totalCollectedAll - totalExpenseAll;
-
-  const weeksWithScores = [...new Set(groupWeeklyScores.map(s => s.week_number))].sort((a, b) => a - b);
-
   return (
     <div className="p-6 max-w-7xl mx-auto space-y-6 text-xs font-sans">
-      {resetRequests.length > 0 && (
-        <div className="bg-amber-50 border border-amber-300 rounded-2xl p-4 space-y-2">
-          <h2 className="font-bold text-amber-900 flex items-center gap-1.5">
-            🔔 {resetRequests.length} Yêu Cầu Cấp Lại Mật Khẩu Từ Học Sinh
-          </h2>
-          <div className="space-y-1.5">
-            {resetRequests.map(r => (
-              <div key={r.id} className="flex items-center justify-between gap-3 bg-white p-2.5 rounded-xl border border-amber-200 flex-wrap">
-                <div>
-                  <span className="font-mono font-bold text-indigo-700 mr-1.5">{r.student_code}</span>
-                  <span className="font-semibold">{r.full_name}</span>
-                  {r.note && <span className="text-slate-500 italic ml-1.5">— "{r.note}"</span>}
-                </div>
-                <div className="flex gap-1.5 shrink-0">
-                  <button onClick={() => handleResolveFromRequest(r)} className="bg-indigo-600 hover:bg-indigo-700 text-white px-2.5 py-1 rounded-lg font-bold">
-                    Cấp Lại Mật Khẩu
-                  </button>
-                  <button onClick={() => handleDismissResetRequest(r.id)} className="bg-slate-100 hover:bg-slate-200 text-slate-600 px-2.5 py-1 rounded-lg font-bold">
-                    Bỏ Qua
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
       <div className="bg-white p-6 rounded-2xl border shadow-sm flex justify-between items-center flex-wrap gap-4">
         <div>
           <h1 className="text-xl font-bold text-slate-800">Bảng Quản Lý Lớp Chủ Nhiệm - {teacher.full_name}</h1>
@@ -3345,10 +1824,8 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
         <div className="flex gap-2 flex-wrap">
           <button onClick={() => setActiveTab('students')} className={`px-4 py-2 rounded-xl font-bold transition ${activeTab === 'students' ? 'bg-indigo-600 text-white shadow' : 'bg-slate-100'}`}>👨‍🎓 Danh Sách Học Sinh</button>
           <button onClick={() => setActiveTab('groups')} className={`px-4 py-2 rounded-xl font-bold transition ${activeTab === 'groups' ? 'bg-indigo-600 text-white shadow' : 'bg-slate-100'}`}>🗂️ Phân Chia Tổ & Ban Cán Sự</button>
-          <button onClick={() => setActiveTab('fees')} className={`px-4 py-2 rounded-xl font-bold transition ${activeTab === 'fees' ? 'bg-indigo-600 text-white shadow' : 'bg-slate-100'}`}>💰 Quản Lý Khoản Thu & Quỹ Lớp</button>
+          <button onClick={() => setActiveTab('fees')} className={`px-4 py-2 rounded-xl font-bold transition ${activeTab === 'fees' ? 'bg-indigo-600 text-white shadow' : 'bg-slate-100'}`}>💰 Quản Lý Khoản Thu</button>
           <button onClick={() => setActiveTab('reports')} className={`px-4 py-2 rounded-xl font-bold transition ${activeTab === 'reports' ? 'bg-indigo-600 text-white shadow' : 'bg-slate-100'}`}>📊 Thi Đua & Báo Cáo</button>
-          <button onClick={() => setActiveTab('rules')} className={`px-4 py-2 rounded-xl font-bold transition ${activeTab === 'rules' ? 'bg-indigo-600 text-white shadow' : 'bg-slate-100'}`}>📖 Nội Quy Thi Đua</button>
-          <button onClick={() => setActiveTab('oral_grades')} className={`px-4 py-2 rounded-xl font-bold transition ${activeTab === 'oral_grades' ? 'bg-indigo-600 text-white shadow' : 'bg-slate-100'}`}>📝 Điểm Miệng</button>
           <button onClick={() => setActiveTab('announcements')} className={`px-4 py-2 rounded-xl font-bold transition ${activeTab === 'announcements' ? 'bg-indigo-600 text-white shadow' : 'bg-slate-100'}`}>📢 Thông Báo & Dặn Dò</button>
         </div>
       </div>
@@ -3409,7 +1886,7 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
                         onChange={(e) => handleUpdateStudentRole(s.id, e.target.value)}
                         className="p-1.5 border border-purple-200 bg-purple-50 text-purple-800 font-bold rounded-xl text-xs focus:ring-2 focus:ring-purple-400 outline-none"
                       >
-                        {ROLES.map(role => <option key={role} value={role}>{role}</option>)}
+                        {getRoleOptions(s.class_role).map(role => <option key={role} value={role}>{role}</option>)}
                       </select>
                     </td>
                     <td className="p-3 border-r text-center">
@@ -3424,9 +1901,6 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
                     <td className="p-3 text-center space-x-1">
                       <button onClick={() => handleOpenEditStudent(s)} className="bg-indigo-50 text-indigo-700 border border-indigo-200 px-2.5 py-1 rounded-lg font-bold hover:bg-indigo-100">
                         ✏️ Sửa
-                      </button>
-                      <button onClick={() => handleOpenResetPassword(s)} className="bg-amber-50 text-amber-700 border border-amber-200 px-2.5 py-1 rounded-lg font-bold hover:bg-amber-100">
-                        🔑 Cấp MK
                       </button>
                       <button onClick={() => handleDeleteStudent(s.id)} className="p-1.5 text-rose-600 hover:bg-rose-50 rounded">
                         <Trash2 className="w-4 h-4 inline" />
@@ -3445,41 +1919,42 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
           <div className="bg-white p-5 rounded-2xl border shadow-sm space-y-4">
             <div>
               <h2 className="font-bold text-slate-800 text-sm">📌 Phân Chia Học Sinh Theo Tổ (1 - 4)</h2>
-              <p className="text-slate-500 text-[11px] mt-1">Mỗi học sinh chỉ thuộc 1 Tổ duy nhất. Dùng ô chọn "Chuyển sang Tổ..." ở mỗi học sinh để đổi Tổ — học sinh sẽ biến mất khỏi danh sách Tổ cũ và xuất hiện ngay trong danh sách Tổ mới.</p>
+              <p className="text-slate-500 text-[11px] mt-1">Tick chọn học sinh vào Tổ tương ứng. Mỗi học sinh chỉ thuộc 1 Tổ — tick vào Tổ khác sẽ tự động chuyển học sinh sang Tổ đó.</p>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-              {[1, 2, 3, 4].map(groupNum => {
-                const groupMembers = students.filter(s => (s.group_number || 1) === groupNum);
-                return (
-                  <div key={groupNum} className="border rounded-2xl overflow-hidden">
-                    <div className="bg-indigo-600 text-white font-bold px-3 py-2 flex justify-between items-center">
-                      <span>Tổ {groupNum}</span>
-                      <span className="bg-indigo-800/60 px-2 py-0.5 rounded-full text-[10px]">{groupMembers.length} HS</span>
-                    </div>
-                    <div className="max-h-72 overflow-y-auto divide-y">
-                      {groupMembers.map(s => (
-                        <div key={s.id} className="flex items-center gap-2 px-3 py-2 hover:bg-slate-50">
+              {[1, 2, 3, 4].map(groupNum => (
+                <div key={groupNum} className="border rounded-2xl overflow-hidden">
+                  <div className="bg-indigo-600 text-white font-bold px-3 py-2 flex justify-between items-center">
+                    <span>Tổ {groupNum}</span>
+                    <span className="bg-indigo-800/60 px-2 py-0.5 rounded-full text-[10px]">
+                      {students.filter(s => (s.group_number || 1) === groupNum).length} HS
+                    </span>
+                  </div>
+                  <div className="max-h-72 overflow-y-auto divide-y">
+                    {students.map(s => {
+                      const checked = (s.group_number || 1) === groupNum;
+                      return (
+                        <label key={s.id} className={`flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-slate-50 ${checked ? 'bg-indigo-50' : ''}`}>
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => handleAssignGroup(s.id, groupNum)}
+                            className="w-4 h-4 accent-indigo-600"
+                          />
                           <span className="flex-1">
                             <span className="font-mono text-indigo-700 font-bold mr-1">{s.code}</span>
                             {s.full_name}
-                            {s.class_role === 'Tổ trưởng' && (
-                              <span className="ml-1.5 text-[10px] bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded font-bold">Tổ trưởng</span>
-                            )}
                           </span>
-                          <select
-                            value={groupNum}
-                            onChange={(e) => handleAssignGroup(s.id, Number(e.target.value))}
-                            className="p-1 border rounded-lg text-[11px] bg-white"
-                          >
-                            {[1, 2, 3, 4].map(g => <option key={g} value={g}>Chuyển sang Tổ {g}</option>)}
-                          </select>
-                        </div>
-                      ))}
-                      {groupMembers.length === 0 && <p className="p-3 text-slate-400 italic">Chưa có học sinh nào trong Tổ này.</p>}
-                    </div>
+                          {checked && s.class_role === 'Tổ trưởng' && (
+                            <span className="text-[10px] bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded font-bold">Tổ trưởng</span>
+                          )}
+                        </label>
+                      );
+                    })}
+                    {students.length === 0 && <p className="p-3 text-slate-400 italic">Chưa có học sinh trong lớp.</p>}
                   </div>
-                );
-              })}
+                </div>
+              ))}
             </div>
           </div>
 
@@ -3490,13 +1965,20 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {['Lớp trưởng', 'Bí thư', 'Thư ký', 'Thủ quỹ'].map(role => {
-                const currentHolder = students.find(s => s.class_role === role);
+              {UNIQUE_CLASS_ROLES.map(role => {
+                const holders = students.filter(s => s.class_role === role);
+                // Khi đang bị trùng (>1 người), để ô chọn trống để GV chọn lại được cả người đầu danh sách.
+                const currentHolderId = holders.length === 1 ? holders[0].id : '';
                 return (
                   <div key={role} className="p-3 border rounded-xl bg-slate-50 space-y-1.5">
                     <label className="font-bold text-slate-700 block">{role}:</label>
+                    {holders.length > 1 && (
+                      <p className="text-[10px] text-red-600 font-semibold">
+                        ⚠️ Đang có {holders.length} học sinh cùng giữ chức vụ này ({holders.map(h => h.full_name).join(', ')}). Chọn lại 1 người để hệ thống tự thu hồi chức vụ của những người còn lại.
+                      </p>
+                    )}
                     <select
-                      value={currentHolder?.id || ''}
+                      value={currentHolderId}
                       onChange={(e) => handleAssignSpecialRole(role, e.target.value)}
                       className="w-full p-2 border rounded-xl bg-white"
                     >
@@ -3541,21 +2023,6 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
 
       {activeTab === 'fees' && (
         <div className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 text-center">
-              <span className="text-[10px] text-emerald-700 font-bold uppercase block">Tổng Đã Thu</span>
-              <span className="text-xl font-black text-emerald-700">{totalCollectedAll.toLocaleString()} đ</span>
-            </div>
-            <div className="bg-rose-50 border border-rose-200 rounded-2xl p-4 text-center">
-              <span className="text-[10px] text-rose-700 font-bold uppercase block">Tổng Đã Chi</span>
-              <span className="text-xl font-black text-rose-700">{totalExpenseAll.toLocaleString()} đ</span>
-            </div>
-            <div className="bg-indigo-50 border border-indigo-200 rounded-2xl p-4 text-center">
-              <span className="text-[10px] text-indigo-700 font-bold uppercase block">Quỹ Lớp Còn Lại</span>
-              <span className="text-xl font-black text-indigo-700">{fundBalanceAll.toLocaleString()} đ</span>
-            </div>
-          </div>
-
           <div className="bg-white p-5 rounded-2xl border shadow-sm">
             <h2 className="font-bold text-slate-800 text-sm mb-3">Tạo Khoản Thu / Quỹ Lớp Mới</h2>
             <form onSubmit={handleAddFeeItem} className="grid grid-cols-1 md:grid-cols-4 gap-3">
@@ -3573,8 +2040,6 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
                   <th className="p-3 border-r">Tên Khoản Thu</th>
                   <th className="p-3 border-r text-right">Số Tiền</th>
                   <th className="p-3 border-r text-center">Hạn Hoàn Thành</th>
-                  <th className="p-3 border-r text-center">Trạng Thái</th>
-                  <th className="p-3 text-center">Thao Tác</th>
                 </tr>
               </thead>
               <tbody className="divide-y text-slate-700">
@@ -3583,71 +2048,10 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
                     <td className="p-3 border-r font-bold">{f.title}</td>
                     <td className="p-3 border-r text-right font-bold text-indigo-700">{Number(f.amount).toLocaleString()} VNĐ</td>
                     <td className="p-3 border-r text-center">{f.deadline || 'Không có'}</td>
-                    <td className="p-3 border-r text-center">
-                      {f.is_completed ? (
-                        <span className="bg-slate-200 text-slate-600 px-2.5 py-1 rounded-full font-bold">✅ Đã Xong</span>
-                      ) : (
-                        <span className="bg-amber-100 text-amber-800 px-2.5 py-1 rounded-full font-bold">⏳ Đang Thu</span>
-                      )}
-                    </td>
-                    <td className="p-3 text-center space-x-1">
-                      <button
-                        onClick={() => handleToggleFeeCompleted(f.id, !!f.is_completed)}
-                        className={`px-2.5 py-1 rounded-lg font-bold ${f.is_completed ? 'bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100' : 'bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100'}`}
-                      >
-                        {f.is_completed ? 'Mở Lại' : '✔ Đã Xong'}
-                      </button>
-                      <button onClick={() => handleDeleteFeeItem(f.id)} className="p-1.5 text-rose-600 hover:bg-rose-50 rounded">
-                        <Trash2 className="w-4 h-4 inline" />
-                      </button>
-                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
-            {feeItems.length === 0 && <p className="text-slate-400 italic p-3">Chưa có khoản thu nào.</p>}
-          </div>
-
-          <div className="bg-white p-5 rounded-2xl border shadow-sm space-y-3">
-            <div className="flex justify-between items-center flex-wrap gap-3">
-              <h2 className="font-bold text-slate-800 text-sm flex items-center gap-2"><Receipt className="w-4 h-4 text-rose-600" /> Ghi Nhận Chi Tiêu Quỹ Lớp</h2>
-              <button onClick={handleExportExpenses} className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-2 rounded-xl font-bold">📥 Xuất Excel</button>
-            </div>
-            <form onSubmit={handleAddExpense} className="grid grid-cols-1 md:grid-cols-5 gap-3">
-              <input type="text" required placeholder="Nội dung chi" value={expTitle} onChange={e => setExpTitle(e.target.value)} className="p-2 border rounded-xl md:col-span-2" />
-              <input type="number" required placeholder="Số tiền (VNĐ)" value={expAmount} onChange={e => setExpAmount(e.target.value)} className="p-2 border rounded-xl" />
-              <input type="date" required value={expDate} onChange={e => setExpDate(e.target.value)} className="p-2 border rounded-xl" />
-              <button type="submit" className="bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl shadow">Ghi Nhận Chi</button>
-            </form>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse">
-                <thead className="bg-rose-50 font-bold border-b text-rose-800">
-                  <tr>
-                    <th className="p-2 border-r">Ngày Chi</th>
-                    <th className="p-2 border-r">Nội Dung Chi</th>
-                    <th className="p-2 border-r text-right">Số Tiền</th>
-                    <th className="p-2 border-r">Ghi Chú</th>
-                    <th className="p-2 text-center">Thao Tác</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y">
-                  {feeExpenses.map(e => (
-                    <tr key={e.id} className="hover:bg-slate-50">
-                      <td className="p-2 border-r font-mono text-slate-600">{e.expense_date}</td>
-                      <td className="p-2 border-r font-semibold">{e.title}</td>
-                      <td className="p-2 border-r text-right font-bold text-rose-700">{Number(e.amount).toLocaleString()} đ</td>
-                      <td className="p-2 border-r text-slate-500 italic">{e.note || '—'}</td>
-                      <td className="p-2 text-center">
-                        <button onClick={() => handleDeleteExpense(e.id)} className="p-1.5 text-rose-600 hover:bg-rose-50 rounded">
-                          <Trash2 className="w-4 h-4 inline" />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              {feeExpenses.length === 0 && <p className="text-slate-400 italic p-3">Chưa có khoản chi nào.</p>}
-            </div>
           </div>
         </div>
       )}
@@ -3707,38 +2111,6 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
               </table>
               {studentRecords.length === 0 && <p className="text-slate-400 italic p-3">Chưa có ghi nhận nào từ Lớp trưởng.</p>}
             </div>
-          </div>
-
-          <div className="bg-white p-5 rounded-2xl border shadow-sm space-y-3">
-            <h2 className="font-bold text-slate-800 text-sm flex items-center gap-2"><Trophy className="w-4 h-4 text-amber-500" /> Bảng Thi Đua Các Tổ Theo Từng Tuần (Lớp trưởng báo cáo)</h2>
-            {weeksWithScores.length === 0 ? (
-              <p className="text-slate-400 italic">Chưa có báo cáo thi đua Tổ nào từ Lớp trưởng.</p>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse">
-                  <thead className="bg-slate-50 font-bold border-b text-slate-700">
-                    <tr>
-                      <th className="p-2 border-r text-center">Tuần</th>
-                      <th className="p-2 border-r text-center">Tổ 1</th>
-                      <th className="p-2 border-r text-center">Tổ 2</th>
-                      <th className="p-2 border-r text-center">Tổ 3</th>
-                      <th className="p-2 text-center">Tổ 4</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y">
-                    {weeksWithScores.map(week => (
-                      <tr key={week} className="hover:bg-slate-50">
-                        <td className="p-2 border-r text-center font-bold">{week}</td>
-                        {[1, 2, 3, 4].map(g => {
-                          const row = groupWeeklyScores.find(s => s.week_number === week && s.group_number === g);
-                          return <td key={g} className="p-2 border-r last:border-r-0 text-center font-bold text-indigo-700">{row ? row.score : '—'}</td>;
-                        })}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
           </div>
 
           <div className="bg-white p-5 rounded-2xl border shadow-sm space-y-3">
@@ -3822,28 +2194,6 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
             )}
           </div>
         </div>
-      )}
-
-      {activeTab === 'rules' && (
-        <div className="bg-white p-6 rounded-2xl border shadow-sm space-y-5">
-          <div className="flex justify-between items-start flex-wrap gap-3 border-b pb-3">
-            <div>
-              <h2 className="text-base font-bold text-slate-900 uppercase">Bảng Quy Định & Bảng Điểm Rèn Luyện Chi Tiết</h2>
-              <p className="text-slate-500 text-[11px] mt-1">Nội dung này hiển thị đồng bộ với trang học sinh và dropdown chọn nội dung của Lớp trưởng — sửa 1 nơi (trong mã nguồn) là cập nhật khắp nơi.</p>
-            </div>
-            <button
-              onClick={downloadCompetitionRulesAsWord}
-              className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl font-bold shadow flex items-center gap-1.5 shrink-0"
-            >
-              📄 Tải Về File Word
-            </button>
-          </div>
-          <CompetitionRulesContent />
-        </div>
-      )}
-
-      {activeTab === 'oral_grades' && (
-        <OralGradesTab teacher={teacher} />
       )}
 
       {activeTab === 'announcements' && (
@@ -3941,20 +2291,6 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
                     🔒 <strong>Thông điệp bí mật:</strong> {selectedStudentForModal.survey_info.secret_message || 'Không có'}
                   </p>
                 </div>
-
-                <div className="bg-amber-50 p-3 rounded-xl space-y-1.5 border border-amber-200">
-                  <h3 className="font-bold text-amber-800 uppercase">5. Góc Chia Sẻ 🔒</h3>
-                  <p>• <strong>Khó khăn về điều kiện học tập:</strong> {selectedStudentForModal.survey_info.family_difficulties || 'Không có'}</p>
-                  <p>• <strong>Điều muốn thầy/cô biết về gia đình:</strong> {selectedStudentForModal.survey_info.family_share || 'Không có'}</p>
-                  <p>• <strong>Nguyện vọng hỗ trợ (học bổng/sách vở/tư vấn):</strong> {selectedStudentForModal.survey_info.support_request || 'Không có'}</p>
-                  <p>• <strong>Mức độ an tâm khi ở nhà:</strong> {selectedStudentForModal.survey_info.home_comfort_level || 'Chưa rõ'}</p>
-                  <p>• <strong>Mức độ cần học bổng/hỗ trợ:</strong> {selectedStudentForModal.survey_info.scholarship_need || 'Chưa chọn'}</p>
-                  <p>• <strong>Khó khăn cụ thể nếu nhận hỗ trợ:</strong> {selectedStudentForModal.survey_info.scholarship_specific_need || 'Không có'}</p>
-                  <p>• <strong>Khó khăn đang đối mặt & nỗ lực vượt qua:</strong> {selectedStudentForModal.survey_info.difficulty_and_effort || 'Không có'}</p>
-                  <p className="text-rose-700 bg-rose-50 p-2 rounded-lg font-medium">
-                    🔒 <strong>Điều khó nói trước đám đông (chỉ GVCN biết):</strong> {selectedStudentForModal.survey_info.private_family_note || 'Không có'}
-                  </p>
-                </div>
               </div>
             ) : (
               <p className="text-slate-400 italic">Học sinh chưa hoàn thành phiếu khảo sát.</p>
@@ -4008,7 +2344,7 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
                     onChange={e => setEditForm({ ...editForm, class_role: e.target.value })}
                     className="w-full p-2 border rounded-xl"
                   >
-                    {ROLES.map(role => <option key={role} value={role}>{role}</option>)}
+                    {getRoleOptions(editForm.class_role).map(role => <option key={role} value={role}>{role}</option>)}
                   </select>
                 </div>
                 <div>
@@ -4021,8 +2357,15 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
                 </div>
               </div>
 
-              <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl">
-                <p className="text-[11px] text-slate-500 italic">🔑 Để cấp lại mật khẩu cho học sinh này, đóng cửa sổ này rồi bấm nút "🔑 Cấp MK" ở bảng danh sách học sinh.</p>
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl space-y-1.5">
+                <label className="font-bold text-amber-800 block">🔒 Cấp lại / Đổi Mật khẩu đăng nhập:</label>
+                <input
+                  type="text" placeholder="Để trống nếu không muốn đổi mật khẩu hiện tại"
+                  value={editForm.password}
+                  onChange={e => setEditForm({ ...editForm, password: e.target.value })}
+                  className="w-full p-2 border rounded-xl font-mono bg-white"
+                />
+                <p className="text-[11px] text-amber-700 italic">* Chỉ nhập khi cần cấp mật khẩu mới cho học sinh (VD: học sinh quên mật khẩu). Để trống sẽ giữ nguyên mật khẩu cũ.</p>
               </div>
 
               <div className="flex gap-2 pt-2">
@@ -4031,40 +2374,6 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
                 </button>
                 <button type="submit" className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow transition">
                   Lưu Thay Đổi
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {resetPasswordTarget && (
-        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-white max-w-sm w-full rounded-2xl shadow-2xl p-6 space-y-4 text-xs">
-            <div className="flex justify-between items-center border-b pb-3">
-              <h2 className="text-base font-bold text-amber-900 flex items-center gap-1.5">🔑 Cấp Lại Mật Khẩu</h2>
-              <button onClick={handleCloseResetPassword} className="text-slate-400 hover:text-slate-600 font-bold text-lg">✕</button>
-            </div>
-            <p className="text-slate-600">
-              Học sinh: <span className="font-mono font-bold text-indigo-700">{resetPasswordTarget.code}</span> — <strong>{resetPasswordTarget.full_name}</strong>
-            </p>
-            <form onSubmit={handleSaveResetPassword} className="space-y-3">
-              <div>
-                <label className="font-semibold block mb-1">Mật khẩu mới (*):</label>
-                <input
-                  type="text" required autoFocus placeholder="Gõ mật khẩu mới cho học sinh"
-                  value={resetPasswordValue}
-                  onChange={e => setResetPasswordValue(e.target.value)}
-                  className="w-full p-2.5 border rounded-xl font-mono"
-                />
-                <p className="text-[11px] text-slate-500 mt-1 italic">* Sau khi lưu, hãy báo mật khẩu này cho học sinh qua kênh riêng (app không tự gửi thông báo).</p>
-              </div>
-              <div className="flex gap-2 pt-1">
-                <button type="button" onClick={handleCloseResetPassword} className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition">
-                  Hủy
-                </button>
-                <button type="submit" disabled={resetPasswordSaving} className="flex-1 py-2.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-xl shadow transition">
-                  {resetPasswordSaving ? 'Đang lưu...' : 'Cấp Mật Khẩu'}
                 </button>
               </div>
             </form>

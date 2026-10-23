@@ -478,7 +478,7 @@ function LoginScreen({ onTeacherLogin, onStudentLogin, onAdminLogin, onForgotPas
     setLoading(true);
 
     const { data, error: rpcErr } = await supabase.rpc('find_teacher_by_class_code', {
-      p_class_code: classCode.trim(),
+      p_class_code: classCode.trim().toUpperCase(),
     });
 
     setLoading(false);
@@ -495,7 +495,12 @@ function LoginScreen({ onTeacherLogin, onStudentLogin, onAdminLogin, onForgotPas
   const handleStudentLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
-    if (!studentCode.trim() || !studentPassword.trim() || !matchedTeacher) return;
+    // MSHS luôn được lưu IN HOA (thêm tay / sửa / nhập Excel đều .toUpperCase()).
+    // Ô nhập chỉ HIỂN THỊ in hoa bằng CSS, giá trị thật vẫn là chữ thường nếu em gõ thường
+    // → phải chuẩn hóa trước khi gửi, nếu không máy chủ so khớp sẽ báo sai MSHS/mật khẩu.
+    const codeInput = studentCode.normalize('NFC').replace(/\s+/g, '').toUpperCase();
+    const pwInput = studentPassword.normalize('NFC').trim();
+    if (!codeInput || !pwInput || !matchedTeacher) return;
     setLoading(true);
 
     // RPC "student_login" (file SQL 03) đối chiếu MSHS + Mật khẩu ở phía máy chủ và trả về hồ sơ học sinh
@@ -503,8 +508,8 @@ function LoginScreen({ onTeacherLogin, onStudentLogin, onAdminLogin, onForgotPas
     // thao tác cần xác thực lại (lưu khảo sát, đổi mật khẩu, lớp trưởng ghi điểm).
     const { data, error: rpcErr } = await supabase.rpc('student_login', {
       p_teacher_id: matchedTeacher.id,
-      p_code: studentCode.trim(),
-      p_password: studentPassword.trim(),
+      p_code: codeInput,
+      p_password: pwInput,
     });
 
     setLoading(false);
@@ -521,7 +526,7 @@ function LoginScreen({ onTeacherLogin, onStudentLogin, onAdminLogin, onForgotPas
       return;
     }
 
-    onStudentLogin({ ...(row as Student), password: studentPassword.trim() });
+    onStudentLogin({ ...(row as Student), password: pwInput });
   };
 
   return (
@@ -591,6 +596,7 @@ function LoginScreen({ onTeacherLogin, onStudentLogin, onAdminLogin, onForgotPas
               <label className="font-semibold block mb-1">Bước 2: Nhập Mã Số Học Sinh (MSHS):</label>
               <input
                 type="text" required placeholder="VD: HS001"
+                autoCapitalize="characters" autoCorrect="off" spellCheck={false}
                 value={studentCode} onChange={e => setStudentCode(e.target.value)}
                 className="w-full p-3 border rounded-xl text-sm uppercase font-mono"
               />
@@ -599,6 +605,7 @@ function LoginScreen({ onTeacherLogin, onStudentLogin, onAdminLogin, onForgotPas
               <label className="font-semibold block mb-1">Mật khẩu (*):</label>
               <input
                 type="password" required placeholder="Do Giáo viên chủ nhiệm cấp"
+                autoCapitalize="none" autoCorrect="off" spellCheck={false} autoComplete="current-password"
                 value={studentPassword} onChange={e => setStudentPassword(e.target.value)}
                 className="w-full p-3 border rounded-xl text-sm"
               />
@@ -1758,22 +1765,48 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
       const workbook = XLSX.read(new Uint8Array(buf), { type: 'array' });
       const date1904 = !!(workbook as any).Workbook?.WBProps?.date1904;
       const sheet = workbook.Sheets[workbook.SheetNames[0]];
-      const rows: any[] = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+      // rawRows: giá trị gốc (dùng cho Ngày sinh dạng số serial, Tổ).
+      // textRows: đúng chữ GV nhìn thấy trong ô (giữ số 0 đầu của MSHS/Mật khẩu như 001, 0912...).
+      const rawRows: any[] = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+      const textRows: any[] = XLSX.utils.sheet_to_json(sheet, { defval: '', raw: false });
 
-      const mapped = rows.map((r) => {
-        const dob = excelDateToISO(r['Ngày sinh'] || r['DOB'] || '', date1904);
-        const code = String(r['MSHS'] || r['Mã số'] || '').trim().toUpperCase();
+      // Tìm cột theo tên KHÔNG phân biệt hoa/thường, dấu tiếng Việt kiểu tổ hợp (Unikey/VNI), khoảng trắng thừa.
+      // Trước đây tiêu đề "Mật khẩu" gõ kiểu tổ hợp hoặc thừa dấu cách sẽ KHÔNG khớp → mật khẩu bị
+      // ngầm đặt bằng MSHS, khác với mật khẩu GV ghi trong file → học sinh đăng nhập báo sai.
+      const pick = (r: any, names: string[]): any => {
+        const wanted = names.map(toRoleKey);
+        for (const k of Object.keys(r)) {
+          if (wanted.includes(toRoleKey(String(k).normalize('NFC')))) {
+            const v = r[k];
+            if (v !== '' && v !== null && v !== undefined) return v;
+          }
+        }
+        return '';
+      };
+      const cleanText = (v: any): string => String(v ?? '').normalize('NFC').replace(/\s+/g, ' ').trim();
+      // Chữ hiển thị của ô; riêng số quá dài bị Excel hiện dạng 1,23E+10 thì lấy lại số gốc.
+      const cellText = (r: any, t: any, names: string[]): string => {
+        const rawV = pick(r, names);
+        const txt = String(pick(t, names) ?? '').normalize('NFC');
+        if (typeof rawV === 'number' && /e[+-]?\d/i.test(txt)) return String(rawV);
+        return txt.trim();
+      };
+
+      const mapped = rawRows.map((r, i) => {
+        const t = textRows[i] || r;
+        const dob = excelDateToISO(pick(r, ['Ngày sinh', 'DOB']), date1904);
+        const code = cellText(r, t, ['MSHS', 'Mã số', 'Mã số học sinh', 'Mã HS']).replace(/\s+/g, '').toUpperCase();
         // Nếu file Excel không có cột Mật khẩu (hoặc để trống), mặc định lấy MSHS làm mật khẩu ban đầu
         // — Giáo viên nên vào "Sửa" từng học sinh để đổi lại mật khẩu riêng cho bảo mật.
-        const password = String(r['Mật khẩu'] || r['Password'] || code || '').trim();
+        const password = cellText(r, t, ['Mật khẩu', 'Mat khau', 'Password', 'MK']).trim() || code;
         return {
           teacher_id: teacher.id,
           code,
-          full_name: String(r['Họ và tên'] || r['Họ tên'] || '').trim(),
+          full_name: cleanText(pick(t, ['Họ và tên', 'Họ tên'])),
           password,
           dob: dob || null,
-          class_role: normalizeRole(r['Chức vụ']),
-          group_number: Number(r['Tổ'] || r['Nhóm'] || 1) || 1,
+          class_role: normalizeRole(pick(t, ['Chức vụ'])),
+          group_number: Number(pick(r, ['Tổ', 'Nhóm']) || 1) || 1,
         };
       }).filter(r => r.code && r.full_name);
 

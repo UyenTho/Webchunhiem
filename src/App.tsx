@@ -69,7 +69,7 @@ interface StudentRecord {
 
 type ViewType =
   | 'login' | 'forgot_password' | 'reset_password' | 'register_payment'
-  | 'admin' | 'teacher' | 'student_portal' | 'class_leader_portal';
+  | 'admin' | 'teacher' | 'student_portal' | 'class_leader_portal' | 'treasurer_portal';
 
 // ==================== BẢNG QUY ĐỊNH ĐIỂM THI ĐUA ====================
 // Đồng bộ với Bảng Nội Quy Thi Đua hiển thị cho học sinh (mục II và III trong StudentPortal).
@@ -148,6 +148,13 @@ const normalizeRole = (raw: any): string => {
 // (dữ liệu cũ / nhập từ Excel), vẫn hiển thị đúng chức vụ đó thay vì hiển thị sai thành 'Học sinh'.
 const getRoleOptions = (current?: string): string[] =>
   current && !ROLES.includes(current) ? [...ROLES, current] : ROLES;
+
+// Kiểm tra chức vụ của học sinh (bền với: viết hoa/thường, gõ không dấu, Unicode tổ hợp, viết tắt).
+// Dùng để điều hướng học sinh có chức vụ Ban cán sự vào đúng cổng chức năng sau khi đăng nhập.
+const hasRole = (role: string | undefined, target: string): boolean => normalizeRole(role) === target;
+const isClassLeader = (s: { class_role?: string } | null | undefined) => hasRole(s?.class_role, 'Lớp trưởng');
+const isTreasurer = (s: { class_role?: string } | null | undefined) =>
+  hasRole(s?.class_role, 'Thủ quỹ') || toRoleKey(String(s?.class_role ?? '')) === 'thu qui';
 
 // ==================== TIỆN ÍCH NGÀY THÁNG ====================
 // KHÔNG dùng new Date().toISOString().slice(0, 10) để lấy "hôm nay": toISOString trả về giờ UTC,
@@ -316,12 +323,9 @@ export default function App() {
           onTeacherLogin={(teacher: Teacher) => { setCurrentTeacher(teacher); setCurrentView('teacher'); }}
           onStudentLogin={(student: Student) => {
             setLoggedInStudent(student);
-            const r = (student.class_role || '').toLowerCase().trim();
-            if (r.includes('lớp trưởng') || r.includes('lop truong')) {
-              setCurrentView('class_leader_portal');
-            } else {
-              setCurrentView('student_portal');
-            }
+            if (isClassLeader(student)) setCurrentView('class_leader_portal');
+            else if (isTreasurer(student)) setCurrentView('treasurer_portal');
+            else setCurrentView('student_portal');
           }}
           onAdminLogin={() => {
             fetchTeachers();
@@ -359,16 +363,29 @@ export default function App() {
         <ClassLeaderPortal student={loggedInStudent} onSwitchToStudentView={() => setCurrentView('student_portal')} />
       )}
 
+      {currentView === 'treasurer_portal' && loggedInStudent && (
+        <TreasurerPortal student={loggedInStudent} onSwitchToStudentView={() => setCurrentView('student_portal')} />
+      )}
+
       {currentView === 'student_portal' && loggedInStudent && (
         <div className="space-y-2">
-          {((loggedInStudent.class_role || '').toLowerCase().includes('lớp trưởng') ||
-            (loggedInStudent.class_role || '').toLowerCase().includes('lop truong')) && (
+          {isClassLeader(loggedInStudent) && (
             <div className="max-w-5xl mx-auto pt-4 px-4 text-right">
               <button
                 onClick={() => setCurrentView('class_leader_portal')}
                 className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs px-4 py-2 rounded-xl shadow"
               >
                 🚀 Mở Cổng Báo Cáo Thi Đua Lớp Trưởng
+              </button>
+            </div>
+          )}
+          {isTreasurer(loggedInStudent) && (
+            <div className="max-w-5xl mx-auto pt-4 px-4 text-right">
+              <button
+                onClick={() => setCurrentView('treasurer_portal')}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-4 py-2 rounded-xl shadow"
+              >
+                💰 Mở Cổng Thu Quỹ Lớp (Thủ quỹ)
               </button>
             </div>
           )}
@@ -1270,6 +1287,10 @@ function ClassLeaderPortal({ student, onSwitchToStudentView }: { student: Studen
       alert('Vui lòng chọn học sinh và nhập nội dung!');
       return;
     }
+    if (!Number.isInteger(weekNumber) || weekNumber < 1 || weekNumber > 52) {
+      alert('Tuần học phải là số từ 1 đến 52.');
+      return;
+    }
     const parsedPoints = parseInt(pointsStr, 10) || 1;
 
     const { error } = await supabase.rpc('leader_add_record', {
@@ -1295,6 +1316,10 @@ function ClassLeaderPortal({ student, onSwitchToStudentView }: { student: Studen
 
   const handleSubmitWeeklySummary = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!Number.isInteger(weekNumber) || weekNumber < 1 || weekNumber > 52) {
+      alert('Tuần học phải là số từ 1 đến 52 (tránh gửi nhầm báo cáo "TUẦN 0").');
+      return;
+    }
     const g1 = parseInt(groupScores.group1, 10) || 0;
     const g2 = parseInt(groupScores.group2, 10) || 0;
     const g3 = parseInt(groupScores.group3, 10) || 0;
@@ -1340,7 +1365,7 @@ function ClassLeaderPortal({ student, onSwitchToStudentView }: { student: Studen
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="font-semibold block mb-1">Chọn Tuần Học (*):</label>
-                <input type="number" min="1" max="52" value={weekNumber} onChange={e => setWeekNumber(Number(e.target.value))} className="w-full p-2 border rounded-xl font-bold" required />
+                <input type="number" min="1" max="52" value={weekNumber || ''} onChange={e => setWeekNumber(Math.floor(Number(e.target.value)) || 0)} className="w-full p-2 border rounded-xl font-bold" required />
               </div>
               <div>
                 <label className="font-semibold block mb-1">Ngày Tháng Cụ Thể (*):</label>
@@ -1490,6 +1515,213 @@ function ClassLeaderPortal({ student, onSwitchToStudentView }: { student: Studen
   );
 }
 
+// ==================== 4b. CỔNG THU QUỸ DÀNH CHO THỦ QUỸ ====================
+// Học sinh đăng nhập KHÔNG dùng Supabase Auth → không ghi trực tiếp được bảng fee_payments (RLS chặn).
+// Mọi thao tác đi qua 2 RPC (file SQL "05_thu_quy_nhap_khoan_thu.sql"), máy chủ tự kiểm tra lại
+// MSHS + mật khẩu và chức vụ "Thủ quỹ", chỉ cho sửa khoản thu của đúng lớp mình.
+function TreasurerPortal({ student, onSwitchToStudentView }: { student: Student; onSwitchToStudentView: () => void }) {
+  const [classStudents, setClassStudents] = useState<Student[]>([]);
+  const [feeItems, setFeeItems] = useState<FeeItem[]>([]);
+  const [payments, setPayments] = useState<{ student_id: string; fee_item_id: string; is_paid: boolean }[]>([]);
+  const [selectedFeeId, setSelectedFeeId] = useState('');
+  const [filter, setFilter] = useState<'all' | 'paid' | 'unpaid'>('all');
+  const [search, setSearch] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [busyKey, setBusyKey] = useState('');
+
+  useEffect(() => {
+    fetchFeeData();
+  }, [student.id]);
+
+  const rpcErrorText = (msg: string, fn: string) =>
+    msg.includes(fn) || msg.toLowerCase().includes('could not find the function')
+      ? 'Hệ thống chưa cập nhật chức năng Thủ quỹ. Em báo Giáo viên chủ nhiệm chạy file SQL cập nhật (05_thu_quy_nhap_khoan_thu.sql) nhé.'
+      : msg;
+
+  const fetchFeeData = async () => {
+    setLoading(true);
+    const { data, error } = await supabase.rpc('treasurer_get_fee_data', {
+      p_student_id: String(student.id),
+      p_password: student.password || '',
+    });
+    setLoading(false);
+    if (error) {
+      setLoadError(rpcErrorText(error.message, 'treasurer_get_fee_data'));
+      return;
+    }
+    setLoadError('');
+    const d: any = data || {};
+    const items = ((d.fee_items || []) as any[]).map(f => ({ ...f, id: String(f.id) })) as FeeItem[];
+    setClassStudents(((d.students || []) as any[]).map(s => ({ ...s, id: String(s.id) })) as Student[]);
+    setFeeItems(items);
+    setPayments(((d.payments || []) as any[]).map(p => ({
+      student_id: String(p.student_id), fee_item_id: String(p.fee_item_id), is_paid: !!p.is_paid,
+    })));
+    setSelectedFeeId(prev => (prev && items.some(f => f.id === prev) ? prev : items[0]?.id || ''));
+  };
+
+  const isPaid = (studentId: string, feeId: string) =>
+    payments.some(p => p.student_id === studentId && p.fee_item_id === feeId && p.is_paid);
+
+  const handleToggle = async (target: Student, feeId: string) => {
+    const current = isPaid(target.id, feeId);
+    if (current && !window.confirm(`Chuyển ${target.full_name} về "Chưa nộp"?`)) return;
+    const key = `${target.id}|${feeId}`;
+    setBusyKey(key);
+    const { error } = await supabase.rpc('treasurer_set_payment', {
+      p_student_id: String(student.id),
+      p_password: student.password || '',
+      p_target_student_id: target.id,
+      p_fee_item_id: feeId,
+      p_is_paid: !current,
+    });
+    setBusyKey('');
+    if (error) {
+      alert('Lỗi cập nhật: ' + rpcErrorText(error.message, 'treasurer_set_payment'));
+      return;
+    }
+    setPayments(prev => {
+      const rest = prev.filter(p => !(p.student_id === target.id && p.fee_item_id === feeId));
+      return [...rest, { student_id: target.id, fee_item_id: feeId, is_paid: !current }];
+    });
+  };
+
+  const selectedFee = feeItems.find(f => f.id === selectedFeeId) || null;
+  const paidCount = selectedFee ? classStudents.filter(s => isPaid(s.id, selectedFee.id)).length : 0;
+  const amount = Number(selectedFee?.amount || 0);
+  const keyword = toRoleKey(search);
+  const visibleStudents = selectedFee
+    ? classStudents.filter(s => {
+        const paid = isPaid(s.id, selectedFee.id);
+        if (filter === 'paid' && !paid) return false;
+        if (filter === 'unpaid' && paid) return false;
+        return !keyword || toRoleKey(`${s.full_name} ${s.code}`).includes(keyword);
+      })
+    : [];
+
+  return (
+    <div className="max-w-5xl mx-auto p-4 md:p-6 space-y-6 text-xs font-sans">
+      <div className="bg-emerald-800 text-white p-5 rounded-2xl shadow-lg flex justify-between items-center flex-wrap gap-3">
+        <div>
+          <span className="bg-emerald-600 border border-emerald-400 px-2.5 py-1 rounded text-[11px] font-bold uppercase">THỦ QUỸ PORTAL</span>
+          <h1 className="text-xl font-bold mt-1">Cổng Thu Quỹ Lớp - Thủ quỹ: {student.full_name}</h1>
+        </div>
+        <div className="flex gap-2">
+          <button onClick={fetchFeeData} className="bg-emerald-700 border border-emerald-400 px-3 py-2 rounded-xl font-bold hover:bg-emerald-600 flex items-center gap-1">
+            <RefreshCw className="w-3.5 h-3.5" /> Làm mới
+          </button>
+          <button onClick={onSwitchToStudentView} className="bg-white text-emerald-900 px-3.5 py-2 rounded-xl font-bold hover:bg-emerald-50 shadow transition">
+            👁️ Xem Trang Cá Nhân Học Sinh
+          </button>
+        </div>
+      </div>
+
+      {loading ? (
+        <p className="text-slate-500 italic">Đang tải dữ liệu khoản thu...</p>
+      ) : loadError ? (
+        <p className="p-4 bg-rose-50 text-rose-700 border border-rose-200 rounded-xl font-medium">{loadError}</p>
+      ) : feeItems.length === 0 ? (
+        <p className="p-4 bg-white border rounded-2xl text-slate-500 italic">Giáo viên chủ nhiệm chưa tạo khoản thu nào.</p>
+      ) : (
+        <div className="bg-white p-5 rounded-2xl border shadow-sm space-y-4">
+          <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2 border-b pb-2">
+            <Wallet className="w-4 h-4 text-emerald-600" /> Cập Nhật Tình Hình Nộp Tiền
+          </h2>
+
+          <div className="flex flex-wrap gap-2">
+            {feeItems.map(f => (
+              <button
+                key={f.id}
+                onClick={() => setSelectedFeeId(f.id)}
+                className={`px-3 py-2 rounded-xl font-bold transition ${f.id === selectedFeeId ? 'bg-emerald-600 text-white shadow' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
+              >
+                {f.title}
+              </button>
+            ))}
+          </div>
+
+          {selectedFee && (
+            <>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <div className="p-3 rounded-xl bg-slate-50 border">
+                  <span className="block text-[10px] font-bold text-slate-500 uppercase">Mức thu / HS</span>
+                  <span className="text-sm font-black text-indigo-700">{amount.toLocaleString()} VNĐ</span>
+                </div>
+                <div className="p-3 rounded-xl bg-slate-50 border">
+                  <span className="block text-[10px] font-bold text-slate-500 uppercase">Hạn nộp</span>
+                  <span className="text-sm font-black text-slate-700">{selectedFee.deadline ? formatDateVN(selectedFee.deadline) : 'Không có'}</span>
+                </div>
+                <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200">
+                  <span className="block text-[10px] font-bold text-emerald-700 uppercase">Đã nộp</span>
+                  <span className="text-sm font-black text-emerald-700">{paidCount}/{classStudents.length} HS · {(paidCount * amount).toLocaleString()}đ</span>
+                </div>
+                <div className="p-3 rounded-xl bg-rose-50 border border-rose-200">
+                  <span className="block text-[10px] font-bold text-rose-700 uppercase">Còn thiếu</span>
+                  <span className="text-sm font-black text-rose-700">{classStudents.length - paidCount} HS · {((classStudents.length - paidCount) * amount).toLocaleString()}đ</span>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap gap-2 items-center">
+                <input
+                  type="text" placeholder="🔍 Tìm theo tên hoặc MSHS..." value={search}
+                  onChange={e => setSearch(e.target.value)} className="p-2 border rounded-xl flex-1 min-w-[180px]"
+                />
+                <select value={filter} onChange={e => setFilter(e.target.value as 'all' | 'paid' | 'unpaid')} className="p-2 border rounded-xl">
+                  <option value="all">Tất cả</option>
+                  <option value="unpaid">Chưa nộp</option>
+                  <option value="paid">Đã nộp</option>
+                </select>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead className="bg-slate-50 font-bold border-b text-slate-700">
+                    <tr>
+                      <th className="p-2 border-r">MSHS</th>
+                      <th className="p-2 border-r">Họ Tên</th>
+                      <th className="p-2 border-r text-center">Tổ</th>
+                      <th className="p-2 text-center">Trạng thái (bấm để đổi)</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {visibleStudents.map(s => {
+                      const paid = isPaid(s.id, selectedFee.id);
+                      const busy = busyKey === `${s.id}|${selectedFee.id}`;
+                      return (
+                        <tr key={s.id} className="hover:bg-slate-50">
+                          <td className="p-2 border-r font-mono">{s.code}</td>
+                          <td className="p-2 border-r font-semibold">{s.full_name}</td>
+                          <td className="p-2 border-r text-center">{s.group_number || 1}</td>
+                          <td className="p-2 text-center">
+                            <button
+                              disabled={!!busyKey}
+                              onClick={() => handleToggle(s, selectedFee.id)}
+                              className={`px-3 py-1 rounded-full font-bold inline-flex items-center gap-1 disabled:opacity-60 ${paid ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' : 'bg-rose-100 text-rose-800 border border-rose-300'}`}
+                            >
+                              {busy ? 'Đang lưu...' : paid
+                                ? <><CheckCircle className="w-3.5 h-3.5" /> Đã nộp</>
+                                : <><XCircle className="w-3.5 h-3.5" /> Chưa nộp</>}
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    {visibleStudents.length === 0 && (
+                      <tr><td colSpan={4} className="p-4 text-center text-slate-400 italic">Không có học sinh phù hợp.</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+              <p className="text-[11px] text-slate-500 italic">* Mọi thay đổi được lưu ngay và Giáo viên chủ nhiệm xem được. Thủ quỹ không tạo/xóa được khoản thu — việc này do GVCN thực hiện.</p>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ==================== 5. BẢNG ĐIỀU KHIỂN GIÁO VIÊN CHỦ NHIỆM ====================
 function TeacherDashboard({ teacher }: { teacher: Teacher }) {
   const [activeTab, setActiveTab] = useState<'students' | 'fees' | 'announcements' | 'reports' | 'groups' | 'oral'>('students');
@@ -1525,6 +1757,12 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
   useEffect(() => {
     fetchData();
   }, [teacher.id]);
+
+  // Thủ quỹ / Lớp trưởng nhập dữ liệu từ máy khác → mỗi lần GV mở tab Khoản thu hoặc Thi đua thì tải lại
+  // để thấy ngay trạng thái nộp tiền, vi phạm mới nhất (không cần đăng xuất / F5).
+  useEffect(() => {
+    if (activeTab === 'fees' || activeTab === 'reports') fetchData();
+  }, [activeTab]);
 
   const fetchData = async () => {
     const [stRes, fRes, aRes, rRes] = await Promise.all([
@@ -1929,6 +2167,17 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
     }
   };
 
+  // Xóa khoản thu tạo nhầm (kèm toàn bộ trạng thái nộp tiền của khoản đó).
+  const handleDeleteFeeItem = async (f: FeeItem) => {
+    const paidCount = feePayments.filter(p => p.fee_item_id === f.id && p.is_paid).length;
+    if (!confirm(`Xóa khoản thu "${f.title}"?` + (paidCount ? `\n${paidCount} học sinh đã được đánh dấu "Đã nộp" — dữ liệu này cũng sẽ bị xóa.` : ''))) return;
+    await supabase.from('fee_payments').delete().eq('fee_item_id', f.id);
+    const { error } = await supabase.from('fee_items').delete().eq('id', f.id);
+    if (error) alert('Không xóa được khoản thu: ' + error.message);
+    if (selectedFeeForUnpaid === f.id) setSelectedFeeForUnpaid('');
+    fetchData();
+  };
+
   const handleAddAnnouncement = async (e: React.FormEvent) => {
     e.preventDefault();
     const { error } = await supabase.from('announcements').insert([
@@ -2206,6 +2455,17 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
             </form>
           </div>
 
+          {(() => {
+            const treasurers = students.filter(s => isTreasurer(s));
+            return (
+              <div className={`p-3 rounded-xl border ${treasurers.length ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-amber-50 border-amber-200 text-amber-800'}`}>
+                {treasurers.length
+                  ? <>💰 Thủ quỹ: <strong>{treasurers.map(t => `${t.full_name} (${t.code})`).join(', ')}</strong> — em đăng nhập bằng tài khoản học sinh sẽ vào <strong>Cổng Thu Quỹ Lớp</strong> để đánh dấu Đã nộp / Chưa nộp. Thầy/cô xem và chỉnh lại ở tab "📊 Thi Đua & Báo Cáo" → "Danh Sách Chưa Nộp Khoản Thu".</>
+                  : <>⚠️ Lớp chưa có Thủ quỹ. Vào tab "🗂️ Phân Chia Tổ & Ban Cán Sự" để phân công, Thủ quỹ sẽ tự cập nhật tình hình nộp tiền.</>}
+              </div>
+            );
+          })()}
+
           <div className="bg-white rounded-2xl border shadow-sm overflow-x-auto">
             <table className="w-full text-left border-collapse">
               <thead className="bg-slate-50 font-bold border-b text-slate-700">
@@ -2213,16 +2473,32 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
                   <th className="p-3 border-r">Tên Khoản Thu</th>
                   <th className="p-3 border-r text-right">Số Tiền</th>
                   <th className="p-3 border-r text-center">Hạn Hoàn Thành</th>
+                  <th className="p-3 border-r text-center">Đã Nộp</th>
+                  <th className="p-3 border-r text-right">Đã Thu</th>
+                  <th className="p-3 text-center">Xóa</th>
                 </tr>
               </thead>
               <tbody className="divide-y text-slate-700">
-                {feeItems.map((f: FeeItem) => (
-                  <tr key={f.id} className="hover:bg-slate-50">
-                    <td className="p-3 border-r font-bold">{f.title}</td>
-                    <td className="p-3 border-r text-right font-bold text-indigo-700">{Number(f.amount).toLocaleString()} VNĐ</td>
-                    <td className="p-3 border-r text-center">{f.deadline || 'Không có'}</td>
-                  </tr>
-                ))}
+                {feeItems.map((f: FeeItem) => {
+                  const paid = students.filter(s => feePayments.some(p => p.student_id === s.id && p.fee_item_id === f.id && p.is_paid)).length;
+                  return (
+                    <tr key={f.id} className="hover:bg-slate-50">
+                      <td className="p-3 border-r font-bold">{f.title}</td>
+                      <td className="p-3 border-r text-right font-bold text-indigo-700">{Number(f.amount).toLocaleString()} VNĐ</td>
+                      <td className="p-3 border-r text-center">{f.deadline || 'Không có'}</td>
+                      <td className="p-3 border-r text-center font-bold">{paid}/{students.length}</td>
+                      <td className="p-3 border-r text-right font-bold text-emerald-700">{(paid * Number(f.amount || 0)).toLocaleString()} VNĐ</td>
+                      <td className="p-3 text-center">
+                        <button onClick={() => handleDeleteFeeItem(f)} title="Xóa khoản thu" className="p-1.5 text-rose-600 hover:bg-rose-50 rounded">
+                          <Trash2 className="w-4 h-4 inline" />
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+                {feeItems.length === 0 && (
+                  <tr><td colSpan={6} className="p-4 text-center text-slate-400 italic">Chưa có khoản thu nào.</td></tr>
+                )}
               </tbody>
             </table>
           </div>
@@ -3456,7 +3732,8 @@ function AdminDashboard({ teachers, onRefresh }: { teachers: Teacher[]; onRefres
 
   const handleDelete = async (id: string) => {
     if (confirm('Xóa hẳn hồ sơ giáo viên này khỏi hệ thống?')) {
-      await supabase.from('teachers').delete().eq('id', id);
+      const { error } = await supabase.from('teachers').delete().eq('id', id);
+      if (error) alert('Không xóa được: ' + error.message);
       await onRefresh();
     }
   };

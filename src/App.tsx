@@ -203,6 +203,50 @@ const formatDateVN = (iso?: string | null): string => {
   return m ? `${m[3]}/${m[2]}/${m[1]}` : iso;
 };
 
+// ==================== SỔ QUỸ LỚP — TIỆN ÍCH ====================
+interface FundTransaction {
+  id: string;
+  tx_type: 'income' | 'expense';
+  amount: number;
+  tx_date: string;
+  description: string;
+  fee_item_id?: string | null;
+  created_by?: string;
+  created_at?: string;
+}
+const formatMoney = (n: number): string => `${Math.round(Number(n) || 0).toLocaleString('vi-VN')}đ`;
+// "1.100.000", "1,100,000", "1100000đ" → 1100000; không hợp lệ → null.
+const parseMoney = (s: string): number | null => {
+  const digits = String(s || '').replace(/[^0-9]/g, '');
+  if (!digits) return null;
+  const v = Number(digits);
+  return Number.isSafeInteger(v) && v > 0 && v <= 1e10 ? v : null;
+};
+const normalizeFundTx = (list: any): FundTransaction[] =>
+  ((list || []) as any[]).map(t => ({
+    ...t,
+    id: String(t.id),
+    amount: Number(t.amount) || 0,
+    tx_date: String(t.tx_date || '').slice(0, 10),
+    description: t.description || '',
+    fee_item_id: t.fee_item_id ? String(t.fee_item_id) : null,
+  }));
+const summarizeFund = (list: FundTransaction[]) => {
+  const income = list.filter(t => t.tx_type === 'income').reduce((s, t) => s + t.amount, 0);
+  const expense = list.filter(t => t.tx_type === 'expense').reduce((s, t) => s + t.amount, 0);
+  return { income, expense, balance: income - expense };
+};
+// Tính "Tồn quỹ" sau từng dòng theo thứ tự thời gian, rồi trả về danh sách MỚI NHẤT lên đầu.
+const withRunningBalance = (list: FundTransaction[]): (FundTransaction & { balance_after: number })[] => {
+  const asc = [...list].sort((a, b) =>
+    a.tx_date.localeCompare(b.tx_date) || String(a.created_at || '').localeCompare(String(b.created_at || '')));
+  let bal = 0;
+  return asc.map(t => {
+    bal += t.tx_type === 'income' ? t.amount : -t.amount;
+    return { ...t, balance_after: bal };
+  }).reverse();
+};
+
 // ==================== ĐIỂM KIỂM TRA MIỆNG — QUY TẮC TÍNH ====================
 // • Mỗi ngày GV có thể nhập cho 1 học sinh: điểm miệng (0–10, có thể để trống), số điểm cộng, số điểm trừ.
 // • Điểm cộng và điểm trừ được tính RIÊNG: mỗi loại đủ 10 thì quy đổi thành 1 điểm chính
@@ -753,6 +797,8 @@ function StudentPortal({ student, onRefreshStudent }: { student: Student; onRefr
   const [feeItems, setFeeItems] = useState<FeeItem[]>([]);
   const [feePayments, setFeePayments] = useState<FeePayment[]>([]);
   const [records, setRecords] = useState<StudentRecord[]>([]);
+  // Sổ quỹ lớp (Thủ quỹ ghi) — null = hệ thống chưa chạy file SQL sổ quỹ → ẩn mục này.
+  const [fundTx, setFundTx] = useState<FundTransaction[] | null>(null);
   const [showRules, setShowRules] = useState(false);
   const [showChangePassword, setShowChangePassword] = useState(false);
   const [pwForm, setPwForm] = useState({ current: '', next: '', confirm: '' });
@@ -804,6 +850,12 @@ function StudentPortal({ student, onRefreshStudent }: { student: Student; onRefr
     if (feeRes.data) setFeeItems(feeRes.data as FeeItem[]);
     if (payRes.data) setFeePayments(payRes.data as FeePayment[]);
     if (recRes.data) setRecords(recRes.data as StudentRecord[]);
+
+    const { data: fundData, error: fundErr } = await supabase.rpc('student_get_fund_summary', {
+      p_student_id: String(student.id),
+      p_password: student.password || '',
+    });
+    setFundTx(fundErr ? null : normalizeFundTx((fundData as any)?.transactions));
   };
 
   // Lớp trưởng có thể gửi lại báo cáo thi đua tuần nhiều lần (mỗi lần gửi tạo 1 dòng thông báo mới).
@@ -1165,6 +1217,18 @@ function StudentPortal({ student, onRefreshStudent }: { student: Student; onRefr
         {feeItems.length === 0 ? (
           <p className="text-slate-400 italic">Chưa có thông báo khoản thu nào.</p>
         ) : (
+          <>
+          {(() => {
+            const unpaidItems = feeItems.filter(f => !feePayments.some(p => p.fee_item_id === f.id && p.is_paid));
+            const owed = unpaidItems.reduce((sum, f) => sum + Number(f.amount || 0), 0);
+            return unpaidItems.length === 0 ? (
+              <p className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 font-bold">✅ Em đã nộp đủ {feeItems.length}/{feeItems.length} khoản thu. Cảm ơn em!</p>
+            ) : (
+              <p className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 font-bold">
+                ⚠️ Em đã nộp {feeItems.length - unpaidItems.length}/{feeItems.length} khoản. Còn phải nộp: {formatMoney(owed)} ({unpaidItems.map(f => f.title).join(', ')}).
+              </p>
+            );
+          })()}
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
               <thead className="bg-slate-50 font-bold border-b text-slate-700">
@@ -1201,21 +1265,54 @@ function StudentPortal({ student, onRefreshStudent }: { student: Student; onRefr
               </tbody>
             </table>
           </div>
+          </>
         )}
       </div>
 
+      {fundTx !== null && (
+        <div className="bg-white p-5 rounded-2xl border shadow-sm space-y-3">
+          <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2 border-b pb-2">
+            <Wallet className="w-4.5 h-4.5 text-emerald-600" /> Sổ Quỹ Lớp (Thủ quỹ cập nhật)
+          </h2>
+          {(() => {
+            const f = summarizeFund(fundTx);
+            const latest = announcements.find(a => a.title.startsWith('[THỦ QUỸ]'));
+            return (
+              <>
+                <FundSummaryCards income={f.income} expense={f.expense} balance={f.balance} />
+                {latest && (
+                  <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 space-y-1">
+                    <div className="flex justify-between items-center gap-2">
+                      <span className="font-bold text-emerald-900">📢 Thông báo mới nhất từ Thủ quỹ: {latest.title.replace(/^\[THỦ QUỸ\]\s*/, '')}</span>
+                      <span className="text-[10px] text-slate-500">{formatDateVN(latest.created_date)}</span>
+                    </div>
+                    <p className="text-slate-700 whitespace-pre-line leading-relaxed">{latest.content}</p>
+                  </div>
+                )}
+                <details>
+                  <summary className="cursor-pointer font-bold text-indigo-700">Xem chi tiết thu – chi ({fundTx.length} dòng)</summary>
+                  <div className="mt-2">
+                    <FundLedgerTable rows={withRunningBalance(fundTx)} feeItems={feeItems} />
+                  </div>
+                </details>
+              </>
+            );
+          })()}
+        </div>
+      )}
+
       <div className="bg-white p-5 rounded-2xl border shadow-sm space-y-3">
         <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2 border-b pb-2">
-          <Bell className="w-4.5 h-4.5 text-indigo-600" /> Thông Báo & Dặn Dò Từ Giáo Viên Chủ Nhiệm
+          <Bell className="w-4.5 h-4.5 text-indigo-600" /> Thông Báo & Dặn Dò (GVCN, Lớp trưởng, Thủ quỹ)
         </h2>
         {(() => {
           const displayAnnouncements = getDisplayAnnouncements(announcements);
           return displayAnnouncements.length === 0 ? (
-            <p className="text-slate-400 italic">Chưa có thông báo nào từ Giáo viên.</p>
+            <p className="text-slate-400 italic">Chưa có thông báo nào.</p>
           ) : (
             <div className="space-y-3">
               {displayAnnouncements.map((a: Announcement) => (
-                <div key={a.id} className={`p-3.5 rounded-xl border ${a.important ? 'bg-amber-50/60 border-amber-200' : 'bg-slate-50 border-slate-200'} space-y-1`}>
+                <div key={a.id} className={`p-3.5 rounded-xl border ${a.important ? 'bg-amber-50/60 border-amber-200' : a.title.startsWith('[THỦ QUỸ]') ? 'bg-emerald-50/60 border-emerald-200' : 'bg-slate-50 border-slate-200'} space-y-1`}>
                   <div className="flex justify-between items-center">
                     <span className="font-bold text-slate-800 text-xs flex items-center gap-1">
                       {a.important && <AlertCircle className="w-3.5 h-3.5 text-amber-600" />} {a.title}
@@ -1516,13 +1613,18 @@ function ClassLeaderPortal({ student, onSwitchToStudentView }: { student: Studen
 }
 
 // ==================== 4b. CỔNG THU QUỸ DÀNH CHO THỦ QUỸ ====================
-// Học sinh đăng nhập KHÔNG dùng Supabase Auth → không ghi trực tiếp được bảng fee_payments (RLS chặn).
-// Mọi thao tác đi qua 2 RPC (file SQL "05_thu_quy_nhap_khoan_thu.sql"), máy chủ tự kiểm tra lại
-// MSHS + mật khẩu và chức vụ "Thủ quỹ", chỉ cho sửa khoản thu của đúng lớp mình.
+// Học sinh đăng nhập KHÔNG dùng Supabase Auth → không ghi trực tiếp được các bảng (RLS chặn).
+// Mọi thao tác đi qua các RPC trong file SQL "05_thu_quy_nhap_khoan_thu.sql"; máy chủ tự kiểm tra lại
+// MSHS + mật khẩu và chức vụ "Thủ quỹ", chỉ cho thao tác trên dữ liệu của đúng lớp mình.
+// Gồm 3 phần: (1) Đánh dấu Đã nộp / Chưa nộp theo từng khoản thu, (2) Sổ quỹ: ghi THU / CHI theo ngày,
+// xóa dòng nhập nhầm, (3) Gửi thông báo quỹ lớp cho cả lớp (có mẫu tổng hợp tự động).
 function TreasurerPortal({ student, onSwitchToStudentView }: { student: Student; onSwitchToStudentView: () => void }) {
+  const [tab, setTab] = useState<'payments' | 'ledger' | 'notify'>('payments');
   const [classStudents, setClassStudents] = useState<Student[]>([]);
   const [feeItems, setFeeItems] = useState<FeeItem[]>([]);
   const [payments, setPayments] = useState<{ student_id: string; fee_item_id: string; is_paid: boolean }[]>([]);
+  const [transactions, setTransactions] = useState<FundTransaction[]>([]);
+  const [myAnnouncements, setMyAnnouncements] = useState<Announcement[]>([]);
   const [selectedFeeId, setSelectedFeeId] = useState('');
   const [filter, setFilter] = useState<'all' | 'paid' | 'unpaid'>('all');
   const [search, setSearch] = useState('');
@@ -1530,21 +1632,35 @@ function TreasurerPortal({ student, onSwitchToStudentView }: { student: Student;
   const [loadError, setLoadError] = useState('');
   const [busyKey, setBusyKey] = useState('');
 
+  // Form sổ quỹ
+  const [txType, setTxType] = useState<'income' | 'expense'>('income');
+  const [txDate, setTxDate] = useState<string>(todayLocalISO());
+  const [txAmount, setTxAmount] = useState('');
+  const [txDesc, setTxDesc] = useState('');
+  const [txFeeId, setTxFeeId] = useState('');
+  const [txSaving, setTxSaving] = useState(false);
+
+  // Form thông báo
+  const [annTitle, setAnnTitle] = useState('');
+  const [annContent, setAnnContent] = useState('');
+  const [annImportant, setAnnImportant] = useState(false);
+  const [includeUnpaidNames, setIncludeUnpaidNames] = useState(false);
+  const [annSending, setAnnSending] = useState(false);
+
   useEffect(() => {
     fetchFeeData();
   }, [student.id]);
 
+  const auth = () => ({ p_student_id: String(student.id), p_password: student.password || '' });
+
   const rpcErrorText = (msg: string, fn: string) =>
-    msg.includes(fn) || msg.toLowerCase().includes('could not find the function')
-      ? 'Hệ thống chưa cập nhật chức năng Thủ quỹ. Em báo Giáo viên chủ nhiệm chạy file SQL cập nhật (05_thu_quy_nhap_khoan_thu.sql) nhé.'
+    msg.includes(fn) || msg.toLowerCase().includes('could not find the function') || msg.includes('class_fund_transactions')
+      ? 'Hệ thống chưa cập nhật đầy đủ chức năng Thủ quỹ. Em báo Giáo viên chủ nhiệm chạy lại file SQL "05_thu_quy_nhap_khoan_thu.sql" (bản mới) nhé.'
       : msg;
 
   const fetchFeeData = async () => {
     setLoading(true);
-    const { data, error } = await supabase.rpc('treasurer_get_fee_data', {
-      p_student_id: String(student.id),
-      p_password: student.password || '',
-    });
+    const { data, error } = await supabase.rpc('treasurer_get_fee_data', auth());
     setLoading(false);
     if (error) {
       setLoadError(rpcErrorText(error.message, 'treasurer_get_fee_data'));
@@ -1558,20 +1674,23 @@ function TreasurerPortal({ student, onSwitchToStudentView }: { student: Student;
     setPayments(((d.payments || []) as any[]).map(p => ({
       student_id: String(p.student_id), fee_item_id: String(p.fee_item_id), is_paid: !!p.is_paid,
     })));
+    setTransactions(normalizeFundTx(d.transactions));
+    setMyAnnouncements(((d.announcements || []) as any[]).map(a => ({ ...a, id: String(a.id) })) as Announcement[]);
     setSelectedFeeId(prev => (prev && items.some(f => f.id === prev) ? prev : items[0]?.id || ''));
   };
 
   const isPaid = (studentId: string, feeId: string) =>
     payments.some(p => p.student_id === studentId && p.fee_item_id === feeId && p.is_paid);
+  const paidCountOf = (feeId: string) => classStudents.filter(s => isPaid(s.id, feeId)).length;
 
+  // ---------- (1) ĐÃ NỘP / CHƯA NỘP ----------
   const handleToggle = async (target: Student, feeId: string) => {
     const current = isPaid(target.id, feeId);
     if (current && !window.confirm(`Chuyển ${target.full_name} về "Chưa nộp"?`)) return;
     const key = `${target.id}|${feeId}`;
     setBusyKey(key);
     const { error } = await supabase.rpc('treasurer_set_payment', {
-      p_student_id: String(student.id),
-      p_password: student.password || '',
+      ...auth(),
       p_target_student_id: target.id,
       p_fee_item_id: feeId,
       p_is_paid: !current,
@@ -1587,8 +1706,114 @@ function TreasurerPortal({ student, onSwitchToStudentView }: { student: Student;
     });
   };
 
+  // ---------- (2) SỔ QUỸ ----------
+  const fund = summarizeFund(transactions);
+  const recordedForFee = (feeId: string) =>
+    transactions.filter(t => t.tx_type === 'income' && t.fee_item_id === feeId).reduce((s, t) => s + t.amount, 0);
+
+  const handleAddTransaction = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const amount = parseMoney(txAmount);
+    if (!amount) { alert('Số tiền không hợp lệ. Nhập số dương, VD: 50000 hoặc 50.000'); return; }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(txDate)) { alert('Vui lòng chọn ngày thu/chi.'); return; }
+    if (txDate > todayLocalISO()) { alert('Ngày thu/chi không được sau ngày hôm nay.'); return; }
+    if (!txDesc.trim()) { alert('Vui lòng ghi nội dung thu/chi (VD: Thu quỹ lớp đợt 1, Mua hoa 20/11...).'); return; }
+    if (txType === 'expense' && amount > fund.balance &&
+      !window.confirm(`Khoản chi ${formatMoney(amount)} lớn hơn số dư quỹ hiện tại (${formatMoney(fund.balance)}). Quỹ sẽ bị âm. Vẫn ghi?`)) return;
+
+    setTxSaving(true);
+    const { error } = await supabase.rpc('treasurer_add_transaction', {
+      ...auth(),
+      p_type: txType,
+      p_amount: amount,
+      p_date: txDate,
+      p_description: txDesc.trim(),
+      p_fee_item_id: txType === 'income' ? txFeeId : '',
+    });
+    setTxSaving(false);
+    if (error) { alert('Lỗi ghi sổ quỹ: ' + rpcErrorText(error.message, 'treasurer_add_transaction')); return; }
+    setTxAmount(''); setTxDesc(''); setTxFeeId('');
+    fetchFeeData();
+  };
+
+  const handleDeleteTransaction = async (t: FundTransaction) => {
+    if (!window.confirm(
+      `Xóa dòng sổ quỹ này?\n\n${t.tx_type === 'income' ? 'THU' : 'CHI'} ${formatMoney(t.amount)} — ngày ${formatDateVN(t.tx_date)}\n"${t.description}"\n\nChỉ xóa khi nhập nhầm. Xóa xong không khôi phục được.`
+    )) return;
+    const { error } = await supabase.rpc('treasurer_delete_transaction', { ...auth(), p_tx_id: t.id });
+    if (error) { alert('Lỗi xóa: ' + rpcErrorText(error.message, 'treasurer_delete_transaction')); return; }
+    setTransactions(prev => prev.filter(x => x.id !== t.id));
+  };
+
+  // Gợi ý điền nhanh khi chọn khoản thu liên quan: số tiền = (số HS đã nộp × mức thu) − số đã ghi sổ.
+  const handlePickFeeForIncome = (feeId: string) => {
+    setTxFeeId(feeId);
+    const f = feeItems.find(x => x.id === feeId);
+    if (!f) return;
+    if (!txDesc.trim()) setTxDesc(`Thu ${f.title}`);
+    const remain = paidCountOf(f.id) * Number(f.amount || 0) - recordedForFee(f.id);
+    if (!txAmount.trim() && remain > 0) setTxAmount(remain.toLocaleString('vi-VN'));
+  };
+
+  // ---------- (3) THÔNG BÁO ----------
+  const buildAutoReport = () => {
+    const lines: string[] = [];
+    lines.push(`💰 TÌNH HÌNH QUỸ LỚP (tính đến ngày ${formatDateVN(todayLocalISO())})`);
+    lines.push(`- Tổng thu: ${formatMoney(fund.income)}`);
+    lines.push(`- Tổng chi: ${formatMoney(fund.expense)}`);
+    lines.push(`- Quỹ lớp còn lại: ${formatMoney(fund.balance)}`);
+    if (feeItems.length > 0) {
+      lines.push('');
+      lines.push('📋 CÁC KHOẢN THU:');
+      feeItems.forEach(f => {
+        const paid = paidCountOf(f.id);
+        const unpaid = classStudents.filter(s => !isPaid(s.id, f.id));
+        lines.push(`• ${f.title} (${formatMoney(Number(f.amount || 0))}/HS${f.deadline ? `, hạn ${formatDateVN(f.deadline)}` : ''}): đã nộp ${paid}/${classStudents.length} HS, còn ${unpaid.length} HS chưa nộp.`);
+        if (includeUnpaidNames && unpaid.length > 0) {
+          lines.push(`   Chưa nộp: ${unpaid.map(s => s.full_name).join(', ')}.`);
+        }
+      });
+    }
+    const recentExpenses = transactions.filter(t => t.tx_type === 'expense').slice(0, 5);
+    if (recentExpenses.length > 0) {
+      lines.push('');
+      lines.push('🧾 CÁC KHOẢN CHI GẦN ĐÂY:');
+      recentExpenses.forEach(t => lines.push(`• ${formatDateVN(t.tx_date)}: ${t.description} — ${formatMoney(t.amount)}`));
+    }
+    lines.push('');
+    lines.push('Các bạn chưa nộp vui lòng nộp cho Thủ quỹ đúng hạn. Mọi thắc mắc liên hệ Thủ quỹ hoặc GVCN.');
+    setAnnTitle(`Báo cáo quỹ lớp ngày ${formatDateVN(todayLocalISO())}`);
+    setAnnContent(lines.join('\n'));
+  };
+
+  const handleSendAnnouncement = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!annContent.trim()) { alert('Nội dung thông báo đang để trống.'); return; }
+    if (!window.confirm('Gửi thông báo này cho CẢ LỚP? (GVCN cũng xem được)')) return;
+    setAnnSending(true);
+    const { error } = await supabase.rpc('treasurer_post_announcement', {
+      ...auth(),
+      p_title: annTitle.trim(),
+      p_content: annContent.trim(),
+      p_important: annImportant,
+    });
+    setAnnSending(false);
+    if (error) { alert('Lỗi gửi thông báo: ' + rpcErrorText(error.message, 'treasurer_post_announcement')); return; }
+    alert('Đã gửi thông báo cho cả lớp!');
+    setAnnTitle(''); setAnnContent(''); setAnnImportant(false);
+    fetchFeeData();
+  };
+
+  const handleDeleteAnnouncement = async (a: Announcement) => {
+    if (!window.confirm(`Xóa thông báo "${a.title}"? Cả lớp sẽ không còn thấy thông báo này.`)) return;
+    const { error } = await supabase.rpc('treasurer_delete_announcement', { ...auth(), p_announcement_id: a.id });
+    if (error) { alert('Lỗi xóa thông báo: ' + rpcErrorText(error.message, 'treasurer_delete_announcement')); return; }
+    setMyAnnouncements(prev => prev.filter(x => x.id !== a.id));
+  };
+
+  // ---------- HIỂN THỊ ----------
   const selectedFee = feeItems.find(f => f.id === selectedFeeId) || null;
-  const paidCount = selectedFee ? classStudents.filter(s => isPaid(s.id, selectedFee.id)).length : 0;
+  const paidCount = selectedFee ? paidCountOf(selectedFee.id) : 0;
   const amount = Number(selectedFee?.amount || 0);
   const keyword = toRoleKey(search);
   const visibleStudents = selectedFee
@@ -1599,6 +1824,14 @@ function TreasurerPortal({ student, onSwitchToStudentView }: { student: Student;
         return !keyword || toRoleKey(`${s.full_name} ${s.code}`).includes(keyword);
       })
     : [];
+  const ledgerRows = withRunningBalance(transactions);
+
+  const tabBtn = (key: 'payments' | 'ledger' | 'notify', label: string) => (
+    <button
+      onClick={() => setTab(key)}
+      className={`px-4 py-2 rounded-xl font-bold transition ${tab === key ? 'bg-emerald-600 text-white shadow' : 'bg-white border text-slate-700 hover:bg-slate-50'}`}
+    >{label}</button>
+  );
 
   return (
     <div className="max-w-5xl mx-auto p-4 md:p-6 space-y-6 text-xs font-sans">
@@ -1607,7 +1840,7 @@ function TreasurerPortal({ student, onSwitchToStudentView }: { student: Student;
           <span className="bg-emerald-600 border border-emerald-400 px-2.5 py-1 rounded text-[11px] font-bold uppercase">THỦ QUỸ PORTAL</span>
           <h1 className="text-xl font-bold mt-1">Cổng Thu Quỹ Lớp - Thủ quỹ: {student.full_name}</h1>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           <button onClick={fetchFeeData} className="bg-emerald-700 border border-emerald-400 px-3 py-2 rounded-xl font-bold hover:bg-emerald-600 flex items-center gap-1">
             <RefreshCw className="w-3.5 h-3.5" /> Làm mới
           </button>
@@ -1618,106 +1851,328 @@ function TreasurerPortal({ student, onSwitchToStudentView }: { student: Student;
       </div>
 
       {loading ? (
-        <p className="text-slate-500 italic">Đang tải dữ liệu khoản thu...</p>
+        <p className="text-slate-500 italic">Đang tải dữ liệu quỹ lớp...</p>
       ) : loadError ? (
         <p className="p-4 bg-rose-50 text-rose-700 border border-rose-200 rounded-xl font-medium">{loadError}</p>
-      ) : feeItems.length === 0 ? (
-        <p className="p-4 bg-white border rounded-2xl text-slate-500 italic">Giáo viên chủ nhiệm chưa tạo khoản thu nào.</p>
       ) : (
-        <div className="bg-white p-5 rounded-2xl border shadow-sm space-y-4">
-          <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2 border-b pb-2">
-            <Wallet className="w-4 h-4 text-emerald-600" /> Cập Nhật Tình Hình Nộp Tiền
-          </h2>
+        <>
+          <FundSummaryCards income={fund.income} expense={fund.expense} balance={fund.balance} />
 
-          <div className="flex flex-wrap gap-2">
-            {feeItems.map(f => (
-              <button
-                key={f.id}
-                onClick={() => setSelectedFeeId(f.id)}
-                className={`px-3 py-2 rounded-xl font-bold transition ${f.id === selectedFeeId ? 'bg-emerald-600 text-white shadow' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
-              >
-                {f.title}
-              </button>
-            ))}
+          <div className="flex gap-2 flex-wrap">
+            {tabBtn('payments', '✅ Đã nộp / Chưa nộp')}
+            {tabBtn('ledger', '📒 Sổ Quỹ Thu – Chi')}
+            {tabBtn('notify', '📢 Gửi Thông Báo Cho Lớp')}
           </div>
 
-          {selectedFee && (
-            <>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                <div className="p-3 rounded-xl bg-slate-50 border">
-                  <span className="block text-[10px] font-bold text-slate-500 uppercase">Mức thu / HS</span>
-                  <span className="text-sm font-black text-indigo-700">{amount.toLocaleString()} VNĐ</span>
+          {/* ===== (1) ĐÃ NỘP / CHƯA NỘP ===== */}
+          {tab === 'payments' && (
+            feeItems.length === 0 ? (
+              <p className="p-4 bg-white border rounded-2xl text-slate-500 italic">Giáo viên chủ nhiệm chưa tạo khoản thu nào.</p>
+            ) : (
+              <div className="bg-white p-5 rounded-2xl border shadow-sm space-y-4">
+                <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2 border-b pb-2">
+                  <Wallet className="w-4 h-4 text-emerald-600" /> Cập Nhật Tình Hình Nộp Tiền Theo Khoản Thu
+                </h2>
+                <div className="flex flex-wrap gap-2">
+                  {feeItems.map(f => (
+                    <button
+                      key={f.id}
+                      onClick={() => setSelectedFeeId(f.id)}
+                      className={`px-3 py-2 rounded-xl font-bold transition ${f.id === selectedFeeId ? 'bg-emerald-600 text-white shadow' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
+                    >
+                      {f.title}
+                    </button>
+                  ))}
                 </div>
-                <div className="p-3 rounded-xl bg-slate-50 border">
-                  <span className="block text-[10px] font-bold text-slate-500 uppercase">Hạn nộp</span>
-                  <span className="text-sm font-black text-slate-700">{selectedFee.deadline ? formatDateVN(selectedFee.deadline) : 'Không có'}</span>
-                </div>
-                <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200">
-                  <span className="block text-[10px] font-bold text-emerald-700 uppercase">Đã nộp</span>
-                  <span className="text-sm font-black text-emerald-700">{paidCount}/{classStudents.length} HS · {(paidCount * amount).toLocaleString()}đ</span>
-                </div>
-                <div className="p-3 rounded-xl bg-rose-50 border border-rose-200">
-                  <span className="block text-[10px] font-bold text-rose-700 uppercase">Còn thiếu</span>
-                  <span className="text-sm font-black text-rose-700">{classStudents.length - paidCount} HS · {((classStudents.length - paidCount) * amount).toLocaleString()}đ</span>
-                </div>
-              </div>
 
-              <div className="flex flex-wrap gap-2 items-center">
-                <input
-                  type="text" placeholder="🔍 Tìm theo tên hoặc MSHS..." value={search}
-                  onChange={e => setSearch(e.target.value)} className="p-2 border rounded-xl flex-1 min-w-[180px]"
-                />
-                <select value={filter} onChange={e => setFilter(e.target.value as 'all' | 'paid' | 'unpaid')} className="p-2 border rounded-xl">
-                  <option value="all">Tất cả</option>
-                  <option value="unpaid">Chưa nộp</option>
-                  <option value="paid">Đã nộp</option>
-                </select>
-              </div>
-
-              <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse">
-                  <thead className="bg-slate-50 font-bold border-b text-slate-700">
-                    <tr>
-                      <th className="p-2 border-r">MSHS</th>
-                      <th className="p-2 border-r">Họ Tên</th>
-                      <th className="p-2 border-r text-center">Tổ</th>
-                      <th className="p-2 text-center">Trạng thái (bấm để đổi)</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y">
-                    {visibleStudents.map(s => {
-                      const paid = isPaid(s.id, selectedFee.id);
-                      const busy = busyKey === `${s.id}|${selectedFee.id}`;
-                      return (
-                        <tr key={s.id} className="hover:bg-slate-50">
-                          <td className="p-2 border-r font-mono">{s.code}</td>
-                          <td className="p-2 border-r font-semibold">{s.full_name}</td>
-                          <td className="p-2 border-r text-center">{s.group_number || 1}</td>
-                          <td className="p-2 text-center">
-                            <button
-                              disabled={!!busyKey}
-                              onClick={() => handleToggle(s, selectedFee.id)}
-                              className={`px-3 py-1 rounded-full font-bold inline-flex items-center gap-1 disabled:opacity-60 ${paid ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' : 'bg-rose-100 text-rose-800 border border-rose-300'}`}
-                            >
-                              {busy ? 'Đang lưu...' : paid
-                                ? <><CheckCircle className="w-3.5 h-3.5" /> Đã nộp</>
-                                : <><XCircle className="w-3.5 h-3.5" /> Chưa nộp</>}
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                    {visibleStudents.length === 0 && (
-                      <tr><td colSpan={4} className="p-4 text-center text-slate-400 italic">Không có học sinh phù hợp.</td></tr>
+                {selectedFee && (
+                  <>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                      <div className="p-3 rounded-xl bg-slate-50 border">
+                        <span className="block text-[10px] font-bold text-slate-500 uppercase">Mức thu / HS</span>
+                        <span className="text-sm font-black text-indigo-700">{formatMoney(amount)}</span>
+                      </div>
+                      <div className="p-3 rounded-xl bg-slate-50 border">
+                        <span className="block text-[10px] font-bold text-slate-500 uppercase">Hạn nộp</span>
+                        <span className="text-sm font-black text-slate-700">{selectedFee.deadline ? formatDateVN(selectedFee.deadline) : 'Không có'}</span>
+                      </div>
+                      <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200">
+                        <span className="block text-[10px] font-bold text-emerald-700 uppercase">Đã nộp</span>
+                        <span className="text-sm font-black text-emerald-700">{paidCount}/{classStudents.length} HS · {formatMoney(paidCount * amount)}</span>
+                      </div>
+                      <div className="p-3 rounded-xl bg-rose-50 border border-rose-200">
+                        <span className="block text-[10px] font-bold text-rose-700 uppercase">Còn thiếu</span>
+                        <span className="text-sm font-black text-rose-700">{classStudents.length - paidCount} HS · {formatMoney((classStudents.length - paidCount) * amount)}</span>
+                      </div>
+                    </div>
+                    {recordedForFee(selectedFee.id) !== paidCount * amount && (
+                      <p className="p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-800">
+                        ⚠️ Theo danh sách đã nộp: <strong>{formatMoney(paidCount * amount)}</strong>, nhưng Sổ quỹ mới ghi thu cho khoản này: <strong>{formatMoney(recordedForFee(selectedFee.id))}</strong>.
+                        {' '}Nhớ vào thẻ "📒 Sổ Quỹ Thu – Chi" ghi số tiền đã thu (chọn đúng khoản thu liên quan).
+                      </p>
                     )}
-                  </tbody>
-                </table>
+
+                    <div className="flex flex-wrap gap-2 items-center">
+                      <input
+                        type="text" placeholder="🔍 Tìm theo tên hoặc MSHS..." value={search}
+                        onChange={e => setSearch(e.target.value)} className="p-2 border rounded-xl flex-1 min-w-[180px]"
+                      />
+                      <select value={filter} onChange={e => setFilter(e.target.value as 'all' | 'paid' | 'unpaid')} className="p-2 border rounded-xl">
+                        <option value="all">Tất cả</option>
+                        <option value="unpaid">Chưa nộp</option>
+                        <option value="paid">Đã nộp</option>
+                      </select>
+                    </div>
+
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left border-collapse">
+                        <thead className="bg-slate-50 font-bold border-b text-slate-700">
+                          <tr>
+                            <th className="p-2 border-r">MSHS</th>
+                            <th className="p-2 border-r">Họ Tên</th>
+                            <th className="p-2 border-r text-center">Tổ</th>
+                            <th className="p-2 text-center">Trạng thái (bấm để đổi)</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y">
+                          {visibleStudents.map(s => {
+                            const paid = isPaid(s.id, selectedFee.id);
+                            const busy = busyKey === `${s.id}|${selectedFee.id}`;
+                            return (
+                              <tr key={s.id} className="hover:bg-slate-50">
+                                <td className="p-2 border-r font-mono">{s.code}</td>
+                                <td className="p-2 border-r font-semibold">{s.full_name}</td>
+                                <td className="p-2 border-r text-center">{s.group_number || 1}</td>
+                                <td className="p-2 text-center">
+                                  <button
+                                    disabled={!!busyKey}
+                                    onClick={() => handleToggle(s, selectedFee.id)}
+                                    className={`px-3 py-1 rounded-full font-bold inline-flex items-center gap-1 disabled:opacity-60 ${paid ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' : 'bg-rose-100 text-rose-800 border border-rose-300'}`}
+                                  >
+                                    {busy ? 'Đang lưu...' : paid
+                                      ? <><CheckCircle className="w-3.5 h-3.5" /> Đã nộp</>
+                                      : <><XCircle className="w-3.5 h-3.5" /> Chưa nộp</>}
+                                  </button>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                          {visibleStudents.length === 0 && (
+                            <tr><td colSpan={4} className="p-4 text-center text-slate-400 italic">Không có học sinh phù hợp.</td></tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                    <p className="text-[11px] text-slate-500 italic">* Thay đổi được lưu ngay; học sinh thấy trạng thái của mình ở mục "Các Khoản Thu & Quỹ Lớp". Thủ quỹ không tạo/xóa được khoản thu — việc này do GVCN thực hiện.</p>
+                  </>
+                )}
               </div>
-              <p className="text-[11px] text-slate-500 italic">* Mọi thay đổi được lưu ngay và Giáo viên chủ nhiệm xem được. Thủ quỹ không tạo/xóa được khoản thu — việc này do GVCN thực hiện.</p>
-            </>
+            )
           )}
-        </div>
+
+          {/* ===== (2) SỔ QUỸ THU – CHI ===== */}
+          {tab === 'ledger' && (
+            <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
+              <div className="lg:col-span-2 bg-white p-5 rounded-2xl border shadow-sm space-y-3 h-fit">
+                <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2 border-b pb-2">
+                  <PlusCircle className="w-4 h-4 text-emerald-600" /> Ghi Khoản Thu / Chi Mới
+                </h2>
+                <form onSubmit={handleAddTransaction} className="space-y-3">
+                  <div className="grid grid-cols-2 gap-2">
+                    <button type="button" onClick={() => setTxType('income')}
+                      className={`py-2 rounded-xl font-bold transition ${txType === 'income' ? 'bg-emerald-600 text-white shadow' : 'bg-slate-100 text-slate-600'}`}>
+                      ➕ Thu tiền
+                    </button>
+                    <button type="button" onClick={() => { setTxType('expense'); setTxFeeId(''); }}
+                      className={`py-2 rounded-xl font-bold transition ${txType === 'expense' ? 'bg-rose-600 text-white shadow' : 'bg-slate-100 text-slate-600'}`}>
+                      ➖ Chi tiền
+                    </button>
+                  </div>
+                  <div>
+                    <label className="font-semibold block mb-1">Ngày {txType === 'income' ? 'thu' : 'chi'} (*):</label>
+                    <input type="date" value={txDate} max={todayLocalISO()} onChange={e => setTxDate(e.target.value)} className="w-full p-2 border rounded-xl" required />
+                  </div>
+                  {txType === 'income' && feeItems.length > 0 && (
+                    <div>
+                      <label className="font-semibold block mb-1">Thuộc khoản thu (không bắt buộc):</label>
+                      <select value={txFeeId} onChange={e => handlePickFeeForIncome(e.target.value)} className="w-full p-2 border rounded-xl">
+                        <option value="">-- Khoản thu khác / không theo khoản --</option>
+                        {feeItems.map(f => <option key={f.id} value={f.id}>{f.title} ({formatMoney(Number(f.amount || 0))}/HS)</option>)}
+                      </select>
+                      {txFeeId && (() => {
+                        const f = feeItems.find(x => x.id === txFeeId);
+                        if (!f) return null;
+                        return (
+                          <p className="text-[11px] text-slate-500 mt-1 italic">
+                            Đã nộp {paidCountOf(f.id)} HS × {formatMoney(Number(f.amount || 0))} = {formatMoney(paidCountOf(f.id) * Number(f.amount || 0))}; đã ghi sổ {formatMoney(recordedForFee(f.id))}.
+                          </p>
+                        );
+                      })()}
+                    </div>
+                  )}
+                  <div>
+                    <label className="font-semibold block mb-1">Số tiền (VNĐ) (*):</label>
+                    <input
+                      type="text" inputMode="numeric" placeholder="VD: 500.000"
+                      value={txAmount}
+                      onChange={e => {
+                        const digits = e.target.value.replace(/[^0-9]/g, '');
+                        setTxAmount(digits ? Number(digits).toLocaleString('vi-VN') : '');
+                      }}
+                      className={`w-full p-2 border rounded-xl font-bold ${txType === 'income' ? 'text-emerald-700' : 'text-rose-700'}`}
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="font-semibold block mb-1">Nội dung (*):</label>
+                    <input
+                      type="text" maxLength={500}
+                      placeholder={txType === 'income' ? 'VD: Thu quỹ lớp đợt 1 (15 bạn)' : 'VD: Mua hoa tặng thầy cô 20/11'}
+                      value={txDesc} onChange={e => setTxDesc(e.target.value)}
+                      className="w-full p-2 border rounded-xl" required
+                    />
+                  </div>
+                  <button type="submit" disabled={txSaving}
+                    className={`w-full py-2.5 text-white font-bold rounded-xl shadow transition disabled:opacity-60 ${txType === 'income' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-rose-600 hover:bg-rose-700'}`}>
+                    {txSaving ? 'Đang lưu...' : txType === 'income' ? 'Ghi Khoản Thu' : 'Ghi Khoản Chi'}
+                  </button>
+                </form>
+              </div>
+
+              <div className="lg:col-span-3 bg-white p-5 rounded-2xl border shadow-sm space-y-3">
+                <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2 border-b pb-2">
+                  <FileText className="w-4 h-4 text-emerald-600" /> Sổ Quỹ Lớp ({transactions.length} dòng)
+                </h2>
+                <FundLedgerTable rows={ledgerRows} feeItems={feeItems} onDelete={handleDeleteTransaction} />
+                <p className="text-[11px] text-slate-500 italic">* Nhập nhầm thì bấm 🗑️ để xóa rồi ghi lại. Cả lớp và GVCN đều xem được sổ quỹ này.</p>
+              </div>
+            </div>
+          )}
+
+          {/* ===== (3) THÔNG BÁO ===== */}
+          {tab === 'notify' && (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <div className="bg-white p-5 rounded-2xl border shadow-sm space-y-3">
+                <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2 border-b pb-2">
+                  <Bell className="w-4 h-4 text-emerald-600" /> Soạn Thông Báo Gửi Cả Lớp
+                </h2>
+                <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl space-y-2">
+                  <label className="flex items-center gap-2 font-semibold text-emerald-900">
+                    <input type="checkbox" checked={includeUnpaidNames} onChange={e => setIncludeUnpaidNames(e.target.checked)} />
+                    Kèm tên các bạn chưa nộp
+                  </label>
+                  <button type="button" onClick={buildAutoReport} className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow">
+                    ⚡ Tạo nội dung tổng hợp tự động
+                  </button>
+                  <p className="text-[11px] text-emerald-800 italic">Tự điền: tổng thu, tổng chi, quỹ còn lại, tình hình nộp từng khoản, các khoản chi gần đây. Em sửa lại nếu cần rồi bấm Gửi.</p>
+                </div>
+                <form onSubmit={handleSendAnnouncement} className="space-y-3">
+                  <input type="text" maxLength={150} placeholder="Tiêu đề (VD: Nhắc nộp quỹ lớp đợt 2)" value={annTitle} onChange={e => setAnnTitle(e.target.value)} className="w-full p-2 border rounded-xl" />
+                  <textarea rows={10} placeholder="Nội dung thông báo..." value={annContent} onChange={e => setAnnContent(e.target.value)} className="w-full p-2 border rounded-xl font-mono text-[11px]" required />
+                  <label className="flex items-center gap-2 font-bold text-amber-700">
+                    <input type="checkbox" checked={annImportant} onChange={e => setAnnImportant(e.target.checked)} /> Đánh dấu quan trọng
+                  </label>
+                  <button type="submit" disabled={annSending} className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow disabled:opacity-60">
+                    {annSending ? 'Đang gửi...' : '📢 Gửi Thông Báo Cho Cả Lớp'}
+                  </button>
+                </form>
+              </div>
+
+              <div className="bg-white p-5 rounded-2xl border shadow-sm space-y-3">
+                <h2 className="text-sm font-bold text-slate-800 border-b pb-2">Thông Báo Thủ Quỹ Đã Gửi ({myAnnouncements.length})</h2>
+                {myAnnouncements.length === 0 ? (
+                  <p className="text-slate-400 italic">Chưa gửi thông báo nào.</p>
+                ) : (
+                  <div className="space-y-2 max-h-[600px] overflow-y-auto">
+                    {myAnnouncements.map(a => (
+                      <div key={a.id} className={`p-3 rounded-xl border ${a.important ? 'bg-amber-50/60 border-amber-200' : 'bg-slate-50'}`}>
+                        <div className="flex justify-between items-start gap-2">
+                          <span className="font-bold text-slate-800">{a.title}</span>
+                          <div className="flex items-center gap-1 shrink-0">
+                            <span className="text-[10px] text-slate-400">{formatDateVN(a.created_date)}</span>
+                            <button onClick={() => handleDeleteAnnouncement(a)} title="Xóa thông báo gửi nhầm" className="p-1 text-rose-600 hover:bg-rose-50 rounded">
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </div>
+                        <p className="text-slate-600 whitespace-pre-line mt-1">{a.content}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </>
       )}
+    </div>
+  );
+}
+
+// ---------- THÀNH PHẦN DÙNG CHUNG CHO SỔ QUỸ (Thủ quỹ, Học sinh, GVCN) ----------
+function FundSummaryCards({ income, expense, balance }: { income: number; expense: number; balance: number }) {
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+      <div className="p-3.5 rounded-2xl bg-emerald-50 border border-emerald-200">
+        <span className="block text-[10px] font-bold text-emerald-700 uppercase">Tổng đã thu</span>
+        <span className="text-base font-black text-emerald-700">{formatMoney(income)}</span>
+      </div>
+      <div className="p-3.5 rounded-2xl bg-rose-50 border border-rose-200">
+        <span className="block text-[10px] font-bold text-rose-700 uppercase">Tổng đã chi</span>
+        <span className="text-base font-black text-rose-700">{formatMoney(expense)}</span>
+      </div>
+      <div className={`p-3.5 rounded-2xl border ${balance < 0 ? 'bg-rose-100 border-rose-300' : 'bg-indigo-50 border-indigo-200'}`}>
+        <span className="block text-[10px] font-bold text-indigo-700 uppercase">Quỹ lớp còn lại</span>
+        <span className={`text-base font-black ${balance < 0 ? 'text-rose-700' : 'text-indigo-700'}`}>{formatMoney(balance)}</span>
+      </div>
+    </div>
+  );
+}
+
+function FundLedgerTable({ rows, feeItems, onDelete }: {
+  rows: (FundTransaction & { balance_after: number })[];
+  feeItems: FeeItem[];
+  onDelete?: (t: FundTransaction) => void;
+}) {
+  if (rows.length === 0) return <p className="text-slate-400 italic">Chưa có khoản thu/chi nào trong sổ quỹ.</p>;
+  return (
+    <div className="overflow-x-auto max-h-[560px] overflow-y-auto">
+      <table className="w-full text-left border-collapse">
+        <thead className="bg-slate-50 font-bold border-b text-slate-700 sticky top-0">
+          <tr>
+            <th className="p-2 border-r text-center">Ngày</th>
+            <th className="p-2 border-r">Nội dung</th>
+            <th className="p-2 border-r text-right">Thu</th>
+            <th className="p-2 border-r text-right">Chi</th>
+            <th className="p-2 text-right">Tồn quỹ</th>
+            {onDelete && <th className="p-2 text-center">Xóa</th>}
+          </tr>
+        </thead>
+        <tbody className="divide-y">
+          {rows.map(t => {
+            const fee = t.fee_item_id ? feeItems.find(f => f.id === t.fee_item_id) : null;
+            return (
+              <tr key={t.id} className="hover:bg-slate-50">
+                <td className="p-2 border-r text-center font-mono whitespace-nowrap">{formatDateVN(t.tx_date)}</td>
+                <td className="p-2 border-r">
+                  {t.description}
+                  {fee && <span className="ml-1 text-[10px] bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded">{fee.title}</span>}
+                </td>
+                <td className="p-2 border-r text-right font-bold text-emerald-700 whitespace-nowrap">{t.tx_type === 'income' ? formatMoney(t.amount) : ''}</td>
+                <td className="p-2 border-r text-right font-bold text-rose-700 whitespace-nowrap">{t.tx_type === 'expense' ? formatMoney(t.amount) : ''}</td>
+                <td className={`p-2 text-right font-bold whitespace-nowrap ${t.balance_after < 0 ? 'text-rose-700' : 'text-indigo-700'}`}>{formatMoney(t.balance_after)}</td>
+                {onDelete && (
+                  <td className="p-2 text-center">
+                    <button onClick={() => onDelete(t)} title="Xóa dòng nhập nhầm" className="p-1 text-rose-600 hover:bg-rose-50 rounded">
+                      <Trash2 className="w-4 h-4 inline" />
+                    </button>
+                  </td>
+                )}
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -1730,6 +2185,7 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
   const [feePayments, setFeePayments] = useState<FeePayment[]>([]);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [studentRecords, setStudentRecords] = useState<StudentRecord[]>([]);
+  const [fundTx, setFundTx] = useState<FundTransaction[] | null>(null);
   const [selectedStudentForModal, setSelectedStudentForModal] = useState<Student | null>(null);
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
   const [editForm, setEditForm] = useState({ code: '', full_name: '', dob: '', class_role: 'Học sinh', group_number: 1, password: '' });
@@ -1784,6 +2240,12 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
     }
     if (aRes.data) setAnnouncements(aRes.data as Announcement[]);
     if (rRes.data) setStudentRecords(rRes.data as StudentRecord[]);
+
+    // Sổ quỹ lớp do Thủ quỹ ghi (bảng class_fund_transactions — tạo bằng file SQL 05). Lỗi = chưa chạy SQL → ẩn.
+    const { data: fData, error: fErr } = await supabase
+      .from('class_fund_transactions').select('*').eq('teacher_id', teacher.id)
+      .order('tx_date', { ascending: false }).order('created_at', { ascending: false });
+    setFundTx(fErr ? null : normalizeFundTx(fData));
   };
 
   // Tìm các học sinh KHÁC đang giữ chức vụ "chỉ 1 người" (để tránh 2 Lớp phó học tập, 2 Lớp trưởng...).
@@ -2125,6 +2587,29 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
     XLSX.writeFile(wb, `KhoanThu.xlsx`);
   };
 
+  const handleDeleteFundTx = async (t: FundTransaction) => {
+    if (!confirm(`Xóa dòng sổ quỹ: ${t.tx_type === 'income' ? 'THU' : 'CHI'} ${formatMoney(t.amount)} ngày ${formatDateVN(t.tx_date)} — "${t.description}"?`)) return;
+    const { error } = await supabase.from('class_fund_transactions').delete().eq('id', t.id);
+    if (error) { alert('Lỗi xóa: ' + error.message); return; }
+    setFundTx(prev => (prev || []).filter(x => x.id !== t.id));
+  };
+
+  const handleExportFund = () => {
+    const rows = withRunningBalance(fundTx || []).reverse().map(t => ({
+      'Ngày': formatDateVN(t.tx_date),
+      'Nội dung': t.description,
+      'Khoản thu liên quan': feeItems.find(f => f.id === t.fee_item_id)?.title || '',
+      'Thu (đ)': t.tx_type === 'income' ? t.amount : '',
+      'Chi (đ)': t.tx_type === 'expense' ? t.amount : '',
+      'Tồn quỹ (đ)': t.balance_after,
+      'Người ghi': t.created_by || '',
+    }));
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'SoQuyLop');
+    XLSX.writeFile(wb, `SoQuyLop_${todayLocalISO()}.xlsx`);
+  };
+
   const handleExportRecords = () => {
     const data = studentRecords.map(r => {
       const st = students.find(s => s.id === r.student_id);
@@ -2460,8 +2945,8 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
             return (
               <div className={`p-3 rounded-xl border ${treasurers.length ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-amber-50 border-amber-200 text-amber-800'}`}>
                 {treasurers.length
-                  ? <>💰 Thủ quỹ: <strong>{treasurers.map(t => `${t.full_name} (${t.code})`).join(', ')}</strong> — em đăng nhập bằng tài khoản học sinh sẽ vào <strong>Cổng Thu Quỹ Lớp</strong> để đánh dấu Đã nộp / Chưa nộp. Thầy/cô xem và chỉnh lại ở tab "📊 Thi Đua & Báo Cáo" → "Danh Sách Chưa Nộp Khoản Thu".</>
-                  : <>⚠️ Lớp chưa có Thủ quỹ. Vào tab "🗂️ Phân Chia Tổ & Ban Cán Sự" để phân công, Thủ quỹ sẽ tự cập nhật tình hình nộp tiền.</>}
+                  ? <>💰 Thủ quỹ: <strong>{treasurers.map(t => `${t.full_name} (${t.code})`).join(', ')}</strong> — em đăng nhập bằng tài khoản học sinh sẽ vào <strong>Cổng Thu Quỹ Lớp</strong> để đánh dấu Đã nộp / Chưa nộp, ghi Sổ quỹ thu – chi và gửi thông báo quỹ cho lớp. Thầy/cô chỉnh trạng thái nộp ở tab "📊 Thi Đua & Báo Cáo" → "Danh Sách Chưa Nộp Khoản Thu".</>
+                  : <>⚠️ Lớp chưa có Thủ quỹ. Vào tab "🗂️ Phân Chia Tổ & Ban Cán Sự" để phân công, Thủ quỹ sẽ cập nhật tình hình nộp tiền và sổ quỹ.</>}
               </div>
             );
           })()}
@@ -2502,6 +2987,19 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
               </tbody>
             </table>
           </div>
+
+          {fundTx === null ? (
+            <p className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-800">⚠️ Chưa bật Sổ quỹ lớp: thầy/cô cần chạy file SQL "05_thu_quy_nhap_khoan_thu.sql" (bản mới) trong Supabase.</p>
+          ) : (
+            <div className="bg-white p-5 rounded-2xl border shadow-sm space-y-3">
+              <div className="flex justify-between items-center flex-wrap gap-3">
+                <h2 className="font-bold text-slate-800 text-sm">📒 Sổ Quỹ Lớp (Thủ quỹ ghi thu – chi)</h2>
+                <button onClick={handleExportFund} disabled={fundTx.length === 0} className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-2 rounded-xl font-bold disabled:opacity-50">📥 Xuất Excel Sổ Quỹ</button>
+              </div>
+              {(() => { const f = summarizeFund(fundTx); return <FundSummaryCards income={f.income} expense={f.expense} balance={f.balance} />; })()}
+              <FundLedgerTable rows={withRunningBalance(fundTx)} feeItems={feeItems} onDelete={handleDeleteFundTx} />
+            </div>
+          )}
         </div>
       )}
 

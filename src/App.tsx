@@ -37,6 +37,7 @@ interface FeeItem {
   title: string;
   amount: number;
   deadline?: string;
+  is_completed?: boolean; // GVCN đánh dấu đã hoàn thành thu khoản này
 }
 
 interface FeePayment {
@@ -65,11 +66,13 @@ interface StudentRecord {
   points: number;
   record_date?: string;
   created_at?: string;
+  recorded_by?: string | null;     // người nhập (Tổ trưởng...) — trống = Lớp trưởng
+  recorded_by_id?: string | null;
 }
 
 type ViewType =
   | 'login' | 'forgot_password' | 'reset_password' | 'register_payment'
-  | 'admin' | 'teacher' | 'student_portal' | 'class_leader_portal' | 'treasurer_portal';
+  | 'admin' | 'teacher' | 'student_portal' | 'class_leader_portal' | 'treasurer_portal' | 'group_leader_portal';
 
 // ==================== BẢNG QUY ĐỊNH ĐIỂM THI ĐUA ====================
 // Đồng bộ với Bảng Nội Quy Thi Đua hiển thị cho học sinh (mục II và III trong StudentPortal).
@@ -153,6 +156,8 @@ const getRoleOptions = (current?: string): string[] =>
 // Dùng để điều hướng học sinh có chức vụ Ban cán sự vào đúng cổng chức năng sau khi đăng nhập.
 const hasRole = (role: string | undefined, target: string): boolean => normalizeRole(role) === target;
 const isClassLeader = (s: { class_role?: string } | null | undefined) => hasRole(s?.class_role, 'Lớp trưởng');
+const isGroupLeader = (s: { class_role?: string } | null | undefined) =>
+  hasRole(s?.class_role, 'Tổ trưởng') || toRoleKey(String(s?.class_role ?? '')) === 'tt';
 const isTreasurer = (s: { class_role?: string } | null | undefined) =>
   hasRole(s?.class_role, 'Thủ quỹ') || toRoleKey(String(s?.class_role ?? '')) === 'thu qui';
 
@@ -202,6 +207,167 @@ const formatDateVN = (iso?: string | null): string => {
   const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})/);
   return m ? `${m[3]}/${m[2]}/${m[1]}` : iso;
 };
+
+// ==================== BẢNG NỘI QUY THI ĐUA (DÙNG CHUNG) ====================
+// Dùng chung cho trang học sinh và tab "📖 Nội Quy Thi Đua" của GVCN — sửa 1 nơi là cập nhật khắp nơi.
+function CompetitionRulesContent() {
+  return (
+    <div id="competition-rules-content" className="space-y-4 text-slate-700 leading-relaxed">
+      <h3 className="font-bold text-indigo-800 text-xs uppercase border-l-4 border-indigo-600 pl-2">I. Khung Xếp Loại Rèn Luyện Cuối Học Kỳ</h3>
+      <div className="overflow-x-auto">
+        <table className="w-full text-left border-collapse border border-slate-200">
+          <thead className="bg-indigo-50 font-bold text-indigo-900">
+            <tr>
+              <th className="p-2 border">Mức Điểm Tổng Kết</th>
+              <th className="p-2 border">Xếp Loại Hạnh Kiểm</th>
+              <th className="p-2 border">Tác Động & Hướng Xử Lý</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y">
+            <tr><td className="p-2 border font-bold">≥ 85 điểm</td><td className="p-2 border text-emerald-700 font-bold">TỐT</td><td className="p-2 border">Tuyên dương, đề xuất khen thưởng Học sinh Tốt/Xuất sắc cuối kỳ.</td></tr>
+            <tr><td className="p-2 border font-bold">60 – 84 điểm</td><td className="p-2 border text-blue-700 font-bold">KHÁ</td><td className="p-2 border">Đạt mức nếp sống văn minh; cần duy trì và phát huy.</td></tr>
+            <tr><td className="p-2 border font-bold">40 – 59 điểm</td><td className="p-2 border text-amber-700 font-bold">ĐẠT</td><td className="p-2 border">Đạt mức tối thiểu; GVCN nhắc nhở và gửi thông báo về gia đình.</td></tr>
+            <tr><td className="p-2 border font-bold">&lt; 40 điểm</td><td className="p-2 border text-rose-700 font-bold">CHƯA ĐẠT (YẾU)</td><td className="p-2 border">Tạm hoãn xét thi đua, mời phụ huynh họp trực tiếp và thực hiện Kế hoạch rèn luyện đặc biệt.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3 className="font-bold text-indigo-800 text-xs uppercase border-l-4 border-indigo-600 pl-2">II. Bảng Cộng Điểm (Chỉ Cộng Điểm 9 & 10)</h3>
+      <p className="italic text-slate-500">* Lưu ý: Các bài kiểm tra/thi đạt điểm từ 8.0 trở xuống KHÔNG được áp dụng cộng điểm rèn luyện.</p>
+      <div className="overflow-x-auto">
+        <table className="w-full text-left border-collapse border border-slate-200">
+          <thead className="bg-emerald-50 font-bold text-emerald-900">
+            <tr><th className="p-2 border">Lĩnh Vực</th><th className="p-2 border">Hành Vi / Thành Tích Được Cộng Điểm</th><th className="p-2 border text-center">Mức Điểm Cộng</th></tr>
+          </thead>
+          <tbody className="divide-y">
+            <tr><td className="p-2 border font-semibold" rowSpan={2}>Kiểm tra / Thi</td><td className="p-2 border">Đạt điểm 10 trong bài kiểm tra (Miệng, 15 phút, Giữa kỳ, Cuối kỳ)</td><td className="p-2 border text-center font-bold text-emerald-700">+3 điểm / lần</td></tr>
+            <tr><td className="p-2 border">Đạt điểm 9 trong bài kiểm tra (Miệng, 15 phút, Giữa kỳ, Cuối kỳ)</td><td className="p-2 border text-center font-bold text-emerald-700">+2 điểm / lần</td></tr>
+            <tr><td className="p-2 border font-semibold" rowSpan={2}>Thi Đấu / Phong Trào</td><td className="p-2 border">Đạt giải Học sinh giỏi / KHKT / Thể thao cấp Trường (hoặc tương đương)</td><td className="p-2 border text-center font-bold text-emerald-700">+5 điểm / giải</td></tr>
+            <tr><td className="p-2 border">Đạt giải Học sinh giỏi / KHKT cấp Tỉnh / Thành phố trở lên</td><td className="p-2 border text-center font-bold text-emerald-700">+10 điểm / giải</td></tr>
+            <tr><td className="p-2 border font-semibold" rowSpan={2}>Đóng Góp Tập Thể</td><td className="p-2 border">Ban cán sự lớp (Lớp trưởng, Lớp phó, Cờ đỏ) hoàn thành xuất sắc nhiệm vụ</td><td className="p-2 border text-center font-bold text-emerald-700">+5 điểm / HK</td></tr>
+            <tr><td className="p-2 border">Nhặt được của rơi trả lại người mất / Hành động dũng cảm giúp đỡ cộng đồng</td><td className="p-2 border text-center font-bold text-emerald-700">+5 điểm / lần</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3 className="font-bold text-indigo-800 text-xs uppercase border-l-4 border-indigo-600 pl-2">III. Bảng Trừ Điểm Hàng Tuần (Theo Sổ Cờ Đỏ / Ban Cán Sự Lớp)</h3>
+      <div className="overflow-x-auto">
+        <table className="w-full text-left border-collapse border border-slate-200">
+          <thead className="bg-rose-50 font-bold text-rose-900">
+            <tr><th className="p-2 border">Lĩnh Vực Vi Phạm</th><th className="p-2 border">Hành Vi Vi Phạm Nội Quy</th><th className="p-2 border text-center">Mức Điểm Trừ</th></tr>
+          </thead>
+          <tbody className="divide-y">
+            <tr><td className="p-2 border font-semibold" rowSpan={4}>Chuyên Cần & Giờ Giấc</td><td className="p-2 border">Đi học muộn (sau tiếng trống vào lớp / giờ truy bài)</td><td className="p-2 border text-center font-bold text-rose-700">-2 điểm / lần</td></tr>
+            <tr><td className="p-2 border">Bỏ giờ truy bài 15 phút đầu giờ</td><td className="p-2 border text-center font-bold text-rose-700">-3 điểm / lần</td></tr>
+            <tr><td className="p-2 border">Nghỉ học không lý do (nghỉ chui)</td><td className="p-2 border text-center font-bold text-rose-700">-10 điểm / buổi</td></tr>
+            <tr><td className="p-2 border">Trốn tiết / Trốn học giữa giờ</td><td className="p-2 border text-center font-bold text-rose-700">-15 điểm / lần</td></tr>
+            <tr><td className="p-2 border font-semibold" rowSpan={5}>Nề Nếp Học Tập</td><td className="p-2 border">Không làm bài tập về nhà / Không chuẩn bị bài theo yêu cầu GVBM</td><td className="p-2 border text-center font-bold text-rose-700">-3 điểm / lần</td></tr>
+            <tr><td className="p-2 border">Không mang sách vở, dụng cụ học tập theo thời khóa biểu</td><td className="p-2 border text-center font-bold text-rose-700">-2 điểm / lần</td></tr>
+            <tr><td className="p-2 border">Mất trật tự, làm việc riêng, ngủ gật trong giờ học</td><td className="p-2 border text-center font-bold text-rose-700">-2 điểm / lần</td></tr>
+            <tr><td className="p-2 border">Sử dụng điện thoại di động khi chưa có sự cho phép của giáo viên</td><td className="p-2 border text-center font-bold text-rose-700">-5 điểm / lần</td></tr>
+            <tr><td className="p-2 border">Gian lận trong kiểm tra, thi cử (quay cóp, sử dụng tài liệu)</td><td className="p-2 border text-center font-bold text-rose-700">-20 điểm / lần</td></tr>
+            <tr><td className="p-2 border font-semibold" rowSpan={4}>Trang Phục & Rèn Luyện</td><td className="p-2 border">Sai đồng phục, không đeo thẻ học sinh, đi dép lê không quai</td><td className="p-2 border text-center font-bold text-rose-700">-2 điểm / lỗi / buổi</td></tr>
+            <tr><td className="p-2 border">Nhuộm tóc màu sáng, nhuộm Highlight, nam để tóc quá dài</td><td className="p-2 border text-center font-bold text-rose-700">-5 điểm / lần</td></tr>
+            <tr><td className="p-2 border">Trang điểm đậm, sơn móng tay/móng chân màu nổi bật</td><td className="p-2 border text-center font-bold text-rose-700">-3 điểm / lần</td></tr>
+            <tr><td className="p-2 border">Hút thuốc lá, thuốc lá điện tử trong trường (hoặc vi phạm ATGT)</td><td className="p-2 border text-center font-bold text-rose-700">-20 điểm / lần</td></tr>
+            <tr><td className="p-2 border font-semibold" rowSpan={4}>Môi Trường & Văn Hóa</td><td className="p-2 border">Bỏ trực nhật / Trực nhật sơ sài, không đổ rác đúng quy định</td><td className="p-2 border text-center font-bold text-rose-700">-5 điểm / lần</td></tr>
+            <tr><td className="p-2 border">Xả rác bừa bãi trong lớp hoặc khuôn viên trường</td><td className="p-2 border text-center font-bold text-rose-700">-3 điểm / lần</td></tr>
+            <tr><td className="p-2 border">Nói tục, chửi thề, gây mất đoàn kết nội bộ lớp</td><td className="p-2 border text-center font-bold text-rose-700">-5 điểm / lần</td></tr>
+            <tr><td className="p-2 border">Mang đồ ăn, nước ngọt vào sử dụng trong giờ học</td><td className="p-2 border text-center font-bold text-rose-700">-2 điểm / lần</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3 className="font-bold text-indigo-800 text-xs uppercase border-l-4 border-indigo-600 pl-2">IV. Công Thức Tính Điểm Tổng Kết</h3>
+      <div className="bg-slate-100 p-3 rounded-xl font-mono text-center text-indigo-900 border font-bold">
+        Điểm Tổng Kết HK = 100 − (Tổng Điểm Trừ Các Tuần) + (Tổng Điểm Cộng)
+      </div>
+    </div>
+  );
+}
+
+// ==================== ĐIỂM THI ĐUA TỔ & GÓC CHIA SẺ (khôi phục từ bản cũ) ====================
+interface GroupWeeklyScore {
+  id?: string;
+  week_number: number;
+  group_number: number;
+  score: number;
+  note?: string | null;
+}
+const SHARING_KEYS = [
+  'family_difficulties', 'family_share', 'support_request', 'home_comfort_level',
+  'scholarship_need', 'scholarship_specific_need', 'difficulty_and_effort', 'private_family_note',
+] as const;
+const hasSharingInfo = (info: any): boolean =>
+  !!info && SHARING_KEYS.some(k => k !== 'home_comfort_level' && String(info[k] ?? '').trim() !== '');
+
+// Bảng điểm thi đua 4 Tổ theo tuần (dùng chung: học sinh, Lớp trưởng, GVCN).
+function GroupScoresTable({ scores, highlightGroup }: { scores: GroupWeeklyScore[]; highlightGroup?: number }) {
+  const weeks = [...new Set(scores.map(s => s.week_number))].sort((a, b) => a - b);
+  if (weeks.length === 0) return <p className="text-slate-400 italic">Chưa có báo cáo thi đua Tổ nào từ Lớp trưởng.</p>;
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-left border-collapse">
+        <thead className="bg-slate-50 font-bold border-b text-slate-700">
+          <tr>
+            <th className="p-2 border-r text-center">Tuần</th>
+            {[1, 2, 3, 4].map(g => <th key={g} className={`p-2 border-r last:border-r-0 text-center ${highlightGroup === g ? 'text-indigo-700' : ''}`}>Tổ {g}{highlightGroup === g ? ' (Tổ em)' : ''}</th>)}
+            <th className="p-2 text-left">Ghi chú</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y">
+          {weeks.map(week => {
+            const rows = scores.filter(s => s.week_number === week);
+            const best = Math.max(...rows.map(r => Number(r.score) || 0));
+            return (
+              <tr key={week} className="hover:bg-slate-50">
+                <td className="p-2 border-r text-center font-bold">{week}</td>
+                {[1, 2, 3, 4].map(g => {
+                  const row = rows.find(s => s.group_number === g);
+                  const isBest = row && Number(row.score) === best && best > 0;
+                  return (
+                    <td key={g} className={`p-2 border-r text-center font-bold ${highlightGroup === g ? 'bg-indigo-50' : ''} ${isBest ? 'text-emerald-700' : 'text-slate-700'}`}>
+                      {row ? row.score : '—'}{isBest ? ' 🏆' : ''}
+                    </td>
+                  );
+                })}
+                <td className="p-2 text-slate-500">{rows.find(r => r.note)?.note || ''}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// Xuất Nội Quy Thi Đua (đang hiển thị trên trang, phần tử id="competition-rules-content") ra file Word.
+// Dùng HTML tương thích Word — Word / LibreOffice / Google Docs đều mở được.
+function downloadCompetitionRulesAsWord() {
+  const el = document.getElementById('competition-rules-content');
+  if (!el) { alert('Không tìm thấy nội dung nội quy để tải.'); return; }
+  const html = `<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
+<head><meta charset="utf-8"><title>Nội Quy Thi Đua</title>
+<style>
+  body { font-family: 'Times New Roman', serif; font-size: 13pt; }
+  h1 { text-align: center; font-size: 15pt; }
+  h3 { font-size: 13pt; margin-top: 16pt; }
+  table { border-collapse: collapse; width: 100%; margin-top: 6pt; }
+  td, th { border: 1px solid #333; padding: 5px 7px; vertical-align: top; }
+  th { background: #eef; font-weight: bold; }
+</style></head>
+<body>
+  <h1>BẢNG NỘI QUY VÀ QUY ĐỊNH ĐIỂM THI ĐUA RÈN LUYỆN</h1>
+  <p style="text-align:center;">Quỹ điểm ban đầu: <b>100 điểm / 1 Học kỳ</b>. Trừ điểm phát sinh theo từng tuần.</p>
+  ${el.innerHTML}
+</body></html>`;
+  const blob = new Blob(['\ufeff', html], { type: 'application/msword' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'NoiQuyThiDua.doc';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
 
 // ==================== SỔ QUỸ LỚP — TIỆN ÍCH ====================
 interface FundTransaction {
@@ -369,6 +535,7 @@ export default function App() {
             setLoggedInStudent(student);
             if (isClassLeader(student)) setCurrentView('class_leader_portal');
             else if (isTreasurer(student)) setCurrentView('treasurer_portal');
+            else if (isGroupLeader(student)) setCurrentView('group_leader_portal');
             else setCurrentView('student_portal');
           }}
           onAdminLogin={() => {
@@ -407,6 +574,10 @@ export default function App() {
         <ClassLeaderPortal student={loggedInStudent} onSwitchToStudentView={() => setCurrentView('student_portal')} />
       )}
 
+      {currentView === 'group_leader_portal' && loggedInStudent && (
+        <GroupLeaderPortal student={loggedInStudent} onSwitchToStudentView={() => setCurrentView('student_portal')} />
+      )}
+
       {currentView === 'treasurer_portal' && loggedInStudent && (
         <TreasurerPortal student={loggedInStudent} onSwitchToStudentView={() => setCurrentView('student_portal')} />
       )}
@@ -420,6 +591,16 @@ export default function App() {
                 className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs px-4 py-2 rounded-xl shadow"
               >
                 🚀 Mở Cổng Báo Cáo Thi Đua Lớp Trưởng
+              </button>
+            </div>
+          )}
+          {isGroupLeader(loggedInStudent) && (
+            <div className="max-w-5xl mx-auto pt-4 px-4 text-right">
+              <button
+                onClick={() => setCurrentView('group_leader_portal')}
+                className="bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs px-4 py-2 rounded-xl shadow"
+              >
+                📋 Mở Cổng Nhập Thi Đua Tổ {loggedInStudent.group_number || 1} (Tổ trưởng)
               </button>
             </div>
           )}
@@ -799,6 +980,22 @@ function StudentPortal({ student, onRefreshStudent }: { student: Student; onRefr
   const [records, setRecords] = useState<StudentRecord[]>([]);
   // Sổ quỹ lớp (Thủ quỹ ghi) — null = hệ thống chưa chạy file SQL sổ quỹ → ẩn mục này.
   const [fundTx, setFundTx] = useState<FundTransaction[] | null>(null);
+  const [groupScores, setGroupScores] = useState<GroupWeeklyScore[]>([]);
+
+  // "Góc Chia Sẻ" tách RIÊNG khỏi phiếu khảo sát đầu năm — luôn hiển thị, học sinh gửi/cập nhật bất cứ lúc nào.
+  const [sharingData, setSharingData] = useState({
+    family_difficulties: student.survey_info?.family_difficulties || '',
+    family_share: student.survey_info?.family_share || '',
+    support_request: student.survey_info?.support_request || '',
+    home_comfort_level: student.survey_info?.home_comfort_level || 'Rất tốt',
+    scholarship_need: student.survey_info?.scholarship_need || '',
+    scholarship_specific_need: student.survey_info?.scholarship_specific_need || '',
+    difficulty_and_effort: student.survey_info?.difficulty_and_effort || '',
+    private_family_note: student.survey_info?.private_family_note || '',
+  });
+  const [sharingSaving, setSharingSaving] = useState(false);
+  const [sharingSaved, setSharingSaved] = useState(false);
+  const [showSharing, setShowSharing] = useState(false);
   const [showRules, setShowRules] = useState(false);
   const [showChangePassword, setShowChangePassword] = useState(false);
   const [pwForm, setPwForm] = useState({ current: '', next: '', confirm: '' });
@@ -856,7 +1053,31 @@ function StudentPortal({ student, onRefreshStudent }: { student: Student; onRefr
       p_password: student.password || '',
     });
     setFundTx(fundErr ? null : normalizeFundTx((fundData as any)?.transactions));
+
+    const { data: gsData, error: gsErr } = await supabase.rpc('student_get_group_scores', {
+      p_student_id: String(student.id),
+      p_password: student.password || '',
+    });
+    if (!gsErr) setGroupScores(((gsData || []) as any[]).map(r => ({ ...r, score: Number(r.score) })));
   };
+
+  const handleSubmitSharing = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSharingSaving(true);
+    const { error } = await supabase.rpc('student_save_sharing', {
+      p_student_id: String(student.id),
+      p_password: student.password || '',
+      p_sharing: sharingData,
+    });
+    setSharingSaving(false);
+    if (error) {
+      alert(error.message.includes('student_save_sharing')
+        ? 'Hệ thống chưa cập nhật Góc Chia Sẻ. Em báo GVCN chạy file SQL 09 nhé.'
+        : 'Lỗi gửi Góc Chia Sẻ: ' + error.message);
+      return;
+    }
+    setSharingSaved(true);
+    onRefreshStudent();  };
 
   // Lớp trưởng có thể gửi lại báo cáo thi đua tuần nhiều lần (mỗi lần gửi tạo 1 dòng thông báo mới).
   // Học sinh chỉ cần xem bản MỚI NHẤT của mỗi tuần (đã bao gồm cả điểm tổ và Ghi chú Lớp trưởng mới nhất),
@@ -886,7 +1107,11 @@ function StudentPortal({ student, onRefreshStudent }: { student: Student; onRefr
     const { error } = await supabase.rpc('student_save_survey', {
       p_student_id: student.id,
       p_password: student.password || '',
-      p_survey: surveyData,
+      // Giữ lại các mục "Góc Chia Sẻ" em đã gửi trước đó (nếu có) để phiếu khảo sát không ghi đè mất.
+      p_survey: {
+        ...Object.fromEntries(SHARING_KEYS.filter(k => student.survey_info?.[k] !== undefined).map(k => [k, student.survey_info[k]])),
+        ...surveyData,
+      },
     });
 
     if (error) {
@@ -1011,77 +1236,7 @@ function StudentPortal({ student, onRefreshStudent }: { student: Student; onRefr
             <p className="text-slate-500 text-[11px] mt-1">Quỹ điểm ban đầu: <strong>100 điểm / 1 Học kỳ</strong>. Cách quản lý: Trừ điểm phát sinh theo từng tuần.</p>
           </div>
 
-          <div className="space-y-4 text-slate-700 leading-relaxed">
-            <h3 className="font-bold text-indigo-800 text-xs uppercase border-l-4 border-indigo-600 pl-2">I. Khung Xếp Loại Rèn Luyện Cuối Học Kỳ</h3>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse border border-slate-200">
-                <thead className="bg-indigo-50 font-bold text-indigo-900">
-                  <tr>
-                    <th className="p-2 border">Mức Điểm Tổng Kết</th>
-                    <th className="p-2 border">Xếp Loại Hạnh Kiểm</th>
-                    <th className="p-2 border">Tác Động & Hướng Xử Lý</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y">
-                  <tr><td className="p-2 border font-bold">≥ 85 điểm</td><td className="p-2 border text-emerald-700 font-bold">TỐT</td><td className="p-2 border">Tuyên dương, đề xuất khen thưởng Học sinh Tốt/Xuất sắc cuối kỳ.</td></tr>
-                  <tr><td className="p-2 border font-bold">60 – 84 điểm</td><td className="p-2 border text-blue-700 font-bold">KHÁ</td><td className="p-2 border">Đạt mức nếp sống văn minh; cần duy trì và phát huy.</td></tr>
-                  <tr><td className="p-2 border font-bold">40 – 59 điểm</td><td className="p-2 border text-amber-700 font-bold">ĐẠT</td><td className="p-2 border">Đạt mức tối thiểu; GVCN nhắc nhở và gửi thông báo về gia đình.</td></tr>
-                  <tr><td className="p-2 border font-bold">&lt; 40 điểm</td><td className="p-2 border text-rose-700 font-bold">CHƯA ĐẠT (YẾU)</td><td className="p-2 border">Tạm hoãn xét thi đua, mời phụ huynh họp trực tiếp và thực hiện Kế hoạch rèn luyện đặc biệt.</td></tr>
-                </tbody>
-              </table>
-            </div>
-
-            <h3 className="font-bold text-indigo-800 text-xs uppercase border-l-4 border-indigo-600 pl-2">II. Bảng Cộng Điểm (Chỉ Cộng Điểm 9 & 10)</h3>
-            <p className="italic text-slate-500">* Lưu ý: Các bài kiểm tra/thi đạt điểm từ 8.0 trở xuống KHÔNG được áp dụng cộng điểm rèn luyện.</p>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse border border-slate-200">
-                <thead className="bg-emerald-50 font-bold text-emerald-900">
-                  <tr><th className="p-2 border">Lĩnh Vực</th><th className="p-2 border">Hành Vi / Thành Tích Được Cộng Điểm</th><th className="p-2 border text-center">Mức Điểm Cộng</th></tr>
-                </thead>
-                <tbody className="divide-y">
-                  <tr><td className="p-2 border font-semibold" rowSpan={2}>Kiểm tra / Thi</td><td className="p-2 border">Đạt điểm 10 trong bài kiểm tra (Miệng, 15 phút, Giữa kỳ, Cuối kỳ)</td><td className="p-2 border text-center font-bold text-emerald-700">+3 điểm / lần</td></tr>
-                  <tr><td className="p-2 border">Đạt điểm 9 trong bài kiểm tra (Miệng, 15 phút, Giữa kỳ, Cuối kỳ)</td><td className="p-2 border text-center font-bold text-emerald-700">+2 điểm / lần</td></tr>
-                  <tr><td className="p-2 border font-semibold" rowSpan={2}>Thi Đấu / Phong Trào</td><td className="p-2 border">Đạt giải Học sinh giỏi / KHKT / Thể thao cấp Trường (hoặc tương đương)</td><td className="p-2 border text-center font-bold text-emerald-700">+5 điểm / giải</td></tr>
-                  <tr><td className="p-2 border">Đạt giải Học sinh giỏi / KHKT cấp Tỉnh / Thành phố trở lên</td><td className="p-2 border text-center font-bold text-emerald-700">+10 điểm / giải</td></tr>
-                  <tr><td className="p-2 border font-semibold" rowSpan={2}>Đóng Góp Tập Thể</td><td className="p-2 border">Ban cán sự lớp (Lớp trưởng, Lớp phó, Cờ đỏ) hoàn thành xuất sắc nhiệm vụ</td><td className="p-2 border text-center font-bold text-emerald-700">+5 điểm / HK</td></tr>
-                  <tr><td className="p-2 border">Nhặt được của rơi trả lại người mất / Hành động dũng cảm giúp đỡ cộng đồng</td><td className="p-2 border text-center font-bold text-emerald-700">+5 điểm / lần</td></tr>
-                </tbody>
-              </table>
-            </div>
-
-            <h3 className="font-bold text-indigo-800 text-xs uppercase border-l-4 border-indigo-600 pl-2">III. Bảng Trừ Điểm Hàng Tuần (Theo Sổ Cờ Đỏ / Ban Cán Sự Lớp)</h3>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse border border-slate-200">
-                <thead className="bg-rose-50 font-bold text-rose-900">
-                  <tr><th className="p-2 border">Lĩnh Vực Vi Phạm</th><th className="p-2 border">Hành Vi Vi Phạm Nội Quy</th><th className="p-2 border text-center">Mức Điểm Trừ</th></tr>
-                </thead>
-                <tbody className="divide-y">
-                  <tr><td className="p-2 border font-semibold" rowSpan={4}>Chuyên Cần & Giờ Giấc</td><td className="p-2 border">Đi học muộn (sau tiếng trống vào lớp / giờ truy bài)</td><td className="p-2 border text-center font-bold text-rose-700">-2 điểm / lần</td></tr>
-                  <tr><td className="p-2 border">Bỏ giờ truy bài 15 phút đầu giờ</td><td className="p-2 border text-center font-bold text-rose-700">-3 điểm / lần</td></tr>
-                  <tr><td className="p-2 border">Nghỉ học không lý do (nghỉ chui)</td><td className="p-2 border text-center font-bold text-rose-700">-10 điểm / buổi</td></tr>
-                  <tr><td className="p-2 border">Trốn tiết / Trốn học giữa giờ</td><td className="p-2 border text-center font-bold text-rose-700">-15 điểm / lần</td></tr>
-                  <tr><td className="p-2 border font-semibold" rowSpan={5}>Nề Nếp Học Tập</td><td className="p-2 border">Không làm bài tập về nhà / Không chuẩn bị bài theo yêu cầu GVBM</td><td className="p-2 border text-center font-bold text-rose-700">-3 điểm / lần</td></tr>
-                  <tr><td className="p-2 border">Không mang sách vở, dụng cụ học tập theo thời khóa biểu</td><td className="p-2 border text-center font-bold text-rose-700">-2 điểm / lần</td></tr>
-                  <tr><td className="p-2 border">Mất trật tự, làm việc riêng, ngủ gật trong giờ học</td><td className="p-2 border text-center font-bold text-rose-700">-2 điểm / lần</td></tr>
-                  <tr><td className="p-2 border">Sử dụng điện thoại di động khi chưa có sự cho phép của giáo viên</td><td className="p-2 border text-center font-bold text-rose-700">-5 điểm / lần</td></tr>
-                  <tr><td className="p-2 border">Gian lận trong kiểm tra, thi cử (quay cóp, sử dụng tài liệu)</td><td className="p-2 border text-center font-bold text-rose-700">-20 điểm / lần</td></tr>
-                  <tr><td className="p-2 border font-semibold" rowSpan={4}>Trang Phục & Rèn Luyện</td><td className="p-2 border">Sai đồng phục, không đeo thẻ học sinh, đi dép lê không quai</td><td className="p-2 border text-center font-bold text-rose-700">-2 điểm / lỗi / buổi</td></tr>
-                  <tr><td className="p-2 border">Nhuộm tóc màu sáng, nhuộm Highlight, nam để tóc quá dài</td><td className="p-2 border text-center font-bold text-rose-700">-5 điểm / lần</td></tr>
-                  <tr><td className="p-2 border">Trang điểm đậm, sơn móng tay/móng chân màu nổi bật</td><td className="p-2 border text-center font-bold text-rose-700">-3 điểm / lần</td></tr>
-                  <tr><td className="p-2 border">Hút thuốc lá, thuốc lá điện tử trong trường (hoặc vi phạm ATGT)</td><td className="p-2 border text-center font-bold text-rose-700">-20 điểm / lần</td></tr>
-                  <tr><td className="p-2 border font-semibold" rowSpan={4}>Môi Trường & Văn Hóa</td><td className="p-2 border">Bỏ trực nhật / Trực nhật sơ sài, không đổ rác đúng quy định</td><td className="p-2 border text-center font-bold text-rose-700">-5 điểm / lần</td></tr>
-                  <tr><td className="p-2 border">Xả rác bừa bãi trong lớp hoặc khuôn viên trường</td><td className="p-2 border text-center font-bold text-rose-700">-3 điểm / lần</td></tr>
-                  <tr><td className="p-2 border">Nói tục, chửi thề, gây mất đoàn kết nội bộ lớp</td><td className="p-2 border text-center font-bold text-rose-700">-5 điểm / lần</td></tr>
-                  <tr><td className="p-2 border">Mang đồ ăn, nước ngọt vào sử dụng trong giờ học</td><td className="p-2 border text-center font-bold text-rose-700">-2 điểm / lần</td></tr>
-                </tbody>
-              </table>
-            </div>
-
-            <h3 className="font-bold text-indigo-800 text-xs uppercase border-l-4 border-indigo-600 pl-2">IV. Công Thức Tính Điểm Tổng Kết</h3>
-            <div className="bg-slate-100 p-3 rounded-xl font-mono text-center text-indigo-900 border font-bold">
-              Điểm Tổng Kết HK = 100 − (Tổng Điểm Trừ Các Tuần) + (Tổng Điểm Cộng)
-            </div>
-          </div>
+          <CompetitionRulesContent />
         </div>
       )}
 
@@ -1200,6 +1355,7 @@ function StudentPortal({ student, onRefreshStudent }: { student: Student; onRefr
                     {r.record_date && <span className="text-[11px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded font-mono">📅 Ngày: {r.record_date}</span>}
                   </div>
                   <p className="text-slate-700 mt-1">{r.content}</p>
+                  <p className="text-[10px] text-slate-400">Người ghi: {r.recorded_by || 'Lớp trưởng'}</p>
                 </div>
                 <span className={`font-black text-sm ${r.type === 'violation' ? 'text-rose-600' : 'text-emerald-600'}`}>
                   {r.type === 'violation' ? `-${r.points}` : `+${r.points}`}đ
@@ -1209,6 +1365,15 @@ function StudentPortal({ student, onRefreshStudent }: { student: Student; onRefr
           </div>
         )}
       </div>
+
+      {groupScores.length > 0 && (
+        <div className="bg-white p-5 rounded-2xl border shadow-sm space-y-3">
+          <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2 border-b pb-2">
+            <Trophy className="w-4.5 h-4.5 text-amber-500" /> Thi Đua Các Tổ Theo Từng Tuần
+          </h2>
+          <GroupScoresTable scores={groupScores} highlightGroup={student.group_number || 1} />
+        </div>
+      )}
 
       <div className="bg-white p-5 rounded-2xl border shadow-sm space-y-3">
         <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2 border-b pb-2">
@@ -1245,7 +1410,10 @@ function StudentPortal({ student, onRefreshStudent }: { student: Student; onRefr
                   const isPaid = pay?.is_paid || false;
                   return (
                     <tr key={item.id} className="hover:bg-slate-50">
-                      <td className="p-3 border-r font-semibold text-slate-800">{item.title}</td>
+                      <td className="p-3 border-r font-semibold text-slate-800">
+                        {item.title}
+                        {item.is_completed && <span className="ml-1 text-[10px] bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded">Đã hoàn thành thu</span>}
+                      </td>
                       <td className="p-3 border-r text-right font-bold text-indigo-700">{Number(item.amount).toLocaleString()} VNĐ</td>
                       <td className="p-3 border-r text-center text-slate-500 font-medium">{item.deadline || 'Không có'}</td>
                       <td className="p-3 text-center">
@@ -1301,6 +1469,90 @@ function StudentPortal({ student, onRefreshStudent }: { student: Student; onRefr
         </div>
       )}
 
+
+      <div className="bg-gradient-to-br from-amber-50 via-orange-50 to-white p-5 rounded-2xl border border-amber-200 shadow-sm space-y-4">
+        <div>
+          <h2 className="text-sm font-bold text-amber-900 flex items-center gap-2 border-b border-amber-200 pb-2">
+            💛 Góc Chia Sẻ
+          </h2>
+          <p className="text-slate-600 mt-1.5 leading-relaxed">
+            Mục này để em chia sẻ với thầy/cô chủ nhiệm về hoàn cảnh gia đình, khó khăn trong học tập, hoặc nguyện vọng nhận hỗ trợ (học bổng, sách vở...). Hoàn toàn không bắt buộc, em có thể gửi hoặc cập nhật bất cứ lúc nào, và chỉ Giáo viên chủ nhiệm mới xem được.
+          </p>
+        </div>
+
+        {!showSharing ? (
+          <button type="button" onClick={() => setShowSharing(true)} className="w-full py-2.5 bg-amber-100 hover:bg-amber-200 text-amber-900 font-bold rounded-xl border border-amber-300">
+            {hasSharingInfo(student.survey_info) ? '✓ Em đã gửi — Bấm để xem / cập nhật lại' : '💬 Mở Góc Chia Sẻ'}
+          </button>
+        ) : (
+        <form onSubmit={handleSubmitSharing} className="space-y-3 bg-white p-4 rounded-xl border border-amber-100">
+          <div>
+            <label className="font-semibold block mb-1">Gia đình em có đang gặp khó khăn nào về điều kiện học tập không? (Phương tiện đi lại, góc học tập ở nhà, tài liệu học tập, thiết bị kết nối internet...):</label>
+            <textarea rows={2} placeholder="Nếu có, em hãy chia sẻ để thầy/cô hỗ trợ..." value={sharingData.family_difficulties} onChange={e => { setSharingData({ ...sharingData, family_difficulties: e.target.value }); setSharingSaved(false); }} className="w-full p-2 border rounded-xl" />
+          </div>
+          <div>
+            <label className="font-semibold block mb-1">Có điều gì về gia đình mà em muốn thầy/cô biết để hỗ trợ em tốt hơn trong năm học này không?</label>
+            <textarea rows={2} placeholder="Chia sẻ của em (nếu có)..." value={sharingData.family_share} onChange={e => { setSharingData({ ...sharingData, family_share: e.target.value }); setSharingSaved(false); }} className="w-full p-2 border rounded-xl" />
+          </div>
+          <div>
+            <label className="font-semibold block mb-1">Em có nguyện vọng nhận hỗ trợ về học bổng, sách vở hay góc tư vấn riêng không?</label>
+            <textarea rows={2} placeholder="Chia sẻ nguyện vọng của em (nếu có)..." value={sharingData.support_request} onChange={e => { setSharingData({ ...sharingData, support_request: e.target.value }); setSharingSaved(false); }} className="w-full p-2 border rounded-xl" />
+          </div>
+          <div>
+            <label className="font-semibold block mb-1">Mức độ an tâm/thoải mái của em khi ở nhà hiện tại:</label>
+            <select value={sharingData.home_comfort_level} onChange={e => { setSharingData({ ...sharingData, home_comfort_level: e.target.value }); setSharingSaved(false); }} className="w-full p-2 border rounded-xl">
+              <option value="Rất tốt">Rất tốt</option>
+              <option value="Bình thường">Bình thường</option>
+              <option value="Thỉnh thoảng có áp lực">Thỉnh thoảng có áp lực</option>
+              <option value="Rất áp lực">Rất áp lực</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="font-semibold block mb-1.5">Trong năm học này, nhà trường và các nhà hảo tâm có một số suất học bổng/gói hỗ trợ dành cho học sinh có tinh thần vượt khó. Em có nghĩ hoàn cảnh hiện tại của mình cần sự đồng hành này không?</label>
+            <div className="space-y-1.5">
+              {[
+                'Rất cần để giảm bớt gánh nặng cho gia đình',
+                'Cần hỗ trợ một phần (sách vở, đồ dùng học tập, phương tiện)',
+                'Hiện tại gia đình em vẫn tự thu xếp ổn định',
+              ].map(option => (
+                <label key={option} className="flex items-center gap-2 p-2 border rounded-xl cursor-pointer hover:bg-slate-50">
+                  <input
+                    type="radio"
+                    name="scholarship_need"
+                    checked={sharingData.scholarship_need === option}
+                    onChange={() => { setSharingData({ ...sharingData, scholarship_need: option }); setSharingSaved(false); }}
+                    className="w-4 h-4 accent-amber-600"
+                  />
+                  <span>{option}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <label className="font-semibold block mb-1">Nếu nhận được một suất học bổng hoặc sự hỗ trợ từ trường, điều đó sẽ giúp em và gia đình giải quyết khó khăn cụ thể nào nhất?</label>
+            <textarea rows={2} placeholder="Chia sẻ của em (nếu có)..." value={sharingData.scholarship_specific_need} onChange={e => { setSharingData({ ...sharingData, scholarship_specific_need: e.target.value }); setSharingSaved(false); }} className="w-full p-2 border rounded-xl" />
+          </div>
+
+          <div>
+            <label className="font-semibold block mb-1">Thầy cô rất trân trọng nỗ lực vượt khó của các em. Hãy chia sẻ ngắn gọn về một khó khăn mà em/gia đình đang đối mặt và cách em đang cố gắng vượt qua mỗi ngày:</label>
+            <textarea rows={2} placeholder="Chia sẻ của em (nếu có)..." value={sharingData.difficulty_and_effort} onChange={e => { setSharingData({ ...sharingData, difficulty_and_effort: e.target.value }); setSharingSaved(false); }} className="w-full p-2 border rounded-xl" />
+          </div>
+
+          <div>
+            <label className="font-semibold block mb-1">Có điều gì đặc biệt về gia đình mà em thấy khó nói trước đám đông, nhưng muốn thầy/cô chủ nhiệm biết để chủ động đề xuất hỗ trợ khi có cơ hội phù hợp không?</label>
+            <textarea rows={2} placeholder="Chia sẻ riêng của em (nếu có)..." value={sharingData.private_family_note} onChange={e => { setSharingData({ ...sharingData, private_family_note: e.target.value }); setSharingSaved(false); }} className="w-full p-2 border rounded-xl" />
+          </div>
+
+          <button type="submit" disabled={sharingSaving} className="w-full py-2.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-xl shadow transition">
+            {sharingSaving ? 'Đang gửi...' : sharingSaved ? '✓ Đã Gửi — Bấm Để Cập Nhật Lại' : 'Gửi Góc Chia Sẻ Này Cho Thầy/Cô'}
+          </button>
+        </form>
+        )}
+      </div>
+
+
       <div className="bg-white p-5 rounded-2xl border shadow-sm space-y-3">
         <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2 border-b pb-2">
           <Bell className="w-4.5 h-4.5 text-indigo-600" /> Thông Báo & Dặn Dò (GVCN, Lớp trưởng, Thủ quỹ)
@@ -1351,6 +1603,16 @@ function ClassLeaderPortal({ student, onSwitchToStudentView }: { student: Studen
   useEffect(() => {
     fetchClassData();
   }, [student.id]);
+
+  const [scoreHistory, setScoreHistory] = useState<GroupWeeklyScore[]>([]);
+  const fetchScoreHistory = async () => {
+    const { data, error } = await supabase.rpc('student_get_group_scores', {
+      p_student_id: String(student.id),
+      p_password: student.password || '',
+    });
+    if (!error) setScoreHistory(((data || []) as any[]).map(r => ({ ...r, score: Number(r.score) })));
+  };
+  useEffect(() => { fetchScoreHistory(); }, [student.id]);
 
   const fetchClassData = async () => {
     // Chỉ lấy các cột công khai (học sinh không có quyền đọc cột mật khẩu, ngày sinh, khảo sát của bạn khác).
@@ -1433,12 +1695,27 @@ function ClassLeaderPortal({ student, onSwitchToStudentView }: { student: Studen
       p_content: summaryText,
     });
 
-    if (!error) {
-      alert('Đã gửi báo cáo thi đua tuần tới Giáo viên chủ nhiệm!');
-      setLeaderNote('');
-    } else {
+    if (error) {
       alert('Lỗi nộp báo cáo: ' + error.message);
+      return;
     }
+
+    // Lưu điểm từng Tổ vào bảng group_weekly_scores để GVCN và cả lớp xem dạng bảng theo tuần
+    // (gửi lại cùng tuần → cập nhật điểm tuần đó, không tạo trùng).
+    const { error: scoreErr } = await supabase.rpc('leader_save_group_scores', {
+      p_student_id: String(student.id),
+      p_password: student.password || '',
+      p_week_number: weekNumber,
+      p_group1: g1, p_group2: g2, p_group3: g3, p_group4: g4,
+      p_note: leaderNote.trim() || null,
+    });
+    if (scoreErr) {
+      alert('Đã gửi thông báo nhưng chưa lưu được bảng điểm Tổ: ' + scoreErr.message);
+    } else {
+      alert('Đã gửi báo cáo thi đua tuần tới Giáo viên chủ nhiệm!');
+    }
+    setLeaderNote('');
+    fetchScoreHistory();
   };
 
   return (
@@ -1606,8 +1883,264 @@ function ClassLeaderPortal({ student, onSwitchToStudentView }: { student: Studen
               Gửi Báo Cáo Thi Đua Lớp
             </button>
           </form>
+
+          <div className="pt-3 border-t">
+            <h3 className="font-bold text-slate-700 mb-2">Lịch Sử Điểm Thi Đua Các Tổ Đã Gửi</h3>
+            <GroupScoresTable scores={scoreHistory} />
+          </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ==================== 4c. CỔNG NHẬP THI ĐUA DÀNH CHO TỔ TRƯỞNG ====================
+// Tổ trưởng nhập vi phạm / khen thưởng cho các bạn TRONG TỔ MÌNH (giống Lớp trưởng, nhưng chỉ trong Tổ),
+// xem nhật ký thi đua của Tổ, xóa dòng chính mình nhập nhầm. Máy chủ kiểm tra lại chức vụ + Tổ
+// (RPC trong file SQL "10_to_truong_nhap_thi_dua.sql").
+function GroupLeaderPortal({ student, onSwitchToStudentView }: { student: Student; onSwitchToStudentView: () => void }) {
+  const [groupNumber, setGroupNumber] = useState<number>(student.group_number || 1);
+  const [members, setMembers] = useState<Student[]>([]);
+  const [records, setRecords] = useState<StudentRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const [weekNumber, setWeekNumber] = useState<number>(1);
+  const [recordDate, setRecordDate] = useState<string>(todayLocalISO());
+  const [selectedStudentId, setSelectedStudentId] = useState('');
+  const [recordType, setRecordType] = useState<'violation' | 'commendation'>('violation');
+  const [content, setContent] = useState('');
+  const [pointsStr, setPointsStr] = useState<string>('1');
+  const [useCustomContent, setUseCustomContent] = useState(false);
+  const [viewWeek, setViewWeek] = useState<string>('all');
+
+  const auth = () => ({ p_student_id: String(student.id), p_password: student.password || '' });
+  const errText = (msg: string) =>
+    msg.includes('group_leader_') || msg.toLowerCase().includes('could not find the function')
+      ? 'Hệ thống chưa cập nhật chức năng Tổ trưởng. Em báo GVCN chạy file SQL cập nhật nhé.'
+      : msg;
+
+  useEffect(() => { fetchData(true); }, [student.id]);
+
+  const fetchData = async (first = false) => {
+    setLoading(true);
+    const { data, error } = await supabase.rpc('group_leader_get_data', auth());
+    setLoading(false);
+    if (error) { setLoadError(errText(error.message)); return; }
+    setLoadError('');
+    const d: any = data || {};
+    setGroupNumber(Number(d.group_number) || student.group_number || 1);
+    setMembers(((d.students || []) as any[]).map(s => ({ ...s, id: String(s.id) })) as Student[]);
+    const recs = ((d.records || []) as any[]).map(r => ({
+      ...r, id: String(r.id), student_id: String(r.student_id), points: Number(r.points) || 0,
+      week_number: Number(r.week_number) || 0,
+    })) as StudentRecord[];
+    setRecords(recs);
+    if (first && recs.length > 0) setWeekNumber(Math.max(...recs.map(r => r.week_number)) || 1);
+  };
+
+  const handleSelectRuleContent = (value: string) => {
+    if (value === '__custom__') { setUseCustomContent(true); setContent(''); setPointsStr('1'); return; }
+    const rule = COMPETITION_RULES.find(r => r.type === recordType && r.content === value);
+    setUseCustomContent(false);
+    setContent(value);
+    setPointsStr(String(rule?.points ?? 1));
+  };
+
+  const handleAdd = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!Number.isInteger(weekNumber) || weekNumber < 1 || weekNumber > 52) { alert('Tuần học phải là số từ 1 đến 52.'); return; }
+    if (!selectedStudentId || !content.trim()) { alert('Vui lòng chọn bạn trong Tổ và nội dung!'); return; }
+    if (recordDate > todayLocalISO()) { alert('Ngày ghi nhận không được sau hôm nay.'); return; }
+    const pts = parseInt(pointsStr, 10);
+    if (!pts || pts < 1 || pts > 50) { alert('Số điểm phải từ 1 đến 50.'); return; }
+    setSaving(true);
+    const { error } = await supabase.rpc('group_leader_add_record', {
+      ...auth(),
+      p_target_student_id: selectedStudentId,
+      p_week_number: weekNumber,
+      p_record_date: recordDate,
+      p_type: recordType,
+      p_content: content.trim(),
+      p_points: pts,
+    });
+    setSaving(false);
+    if (error) { alert('Lỗi khi lưu: ' + errText(error.message)); return; }
+    const who = members.find(m => m.id === selectedStudentId)?.full_name || '';
+    alert(`Đã lưu ${recordType === 'violation' ? 'vi phạm' : 'khen thưởng'} cho ${who}!`);
+    setContent(''); setPointsStr('1'); setUseCustomContent(false);
+    fetchData();
+  };
+
+  const handleDelete = async (r: StudentRecord) => {
+    const who = members.find(m => m.id === r.student_id)?.full_name || '';
+    if (!window.confirm(`Xóa ghi nhận của ${who}?\n${r.type === 'violation' ? '⚠️ Vi phạm' : '🌟 Khen thưởng'} tuần ${r.week_number}: "${r.content}" (${r.type === 'violation' ? '-' : '+'}${r.points}đ)`)) return;
+    const { error } = await supabase.rpc('group_leader_delete_record', { ...auth(), p_record_id: r.id });
+    if (error) { alert('Lỗi xóa: ' + errText(error.message)); return; }
+    setRecords(prev => prev.filter(x => x.id !== r.id));
+  };
+
+  const weeks = [...new Set(records.map(r => r.week_number))].sort((a, b) => b - a);
+  const shown = records.filter(r => viewWeek === 'all' || String(r.week_number) === viewWeek);
+  const sumOf = (sid: string, type: 'violation' | 'commendation', list: StudentRecord[]) =>
+    list.filter(r => r.student_id === sid && r.type === type).reduce((s, r) => s + Number(r.points || 0), 0);
+
+  return (
+    <div className="max-w-5xl mx-auto p-4 md:p-6 space-y-6 text-xs font-sans">
+      <div className="bg-sky-800 text-white p-5 rounded-2xl shadow-lg flex justify-between items-center flex-wrap gap-3">
+        <div>
+          <span className="bg-sky-600 border border-sky-400 px-2.5 py-1 rounded text-[11px] font-bold uppercase">TỔ TRƯỞNG PORTAL — TỔ {groupNumber}</span>
+          <h1 className="text-xl font-bold mt-1">Cổng Nhập Thi Đua Tổ {groupNumber} - Tổ trưởng: {student.full_name}</h1>
+        </div>
+        <div className="flex gap-2 flex-wrap">
+          <button onClick={() => fetchData()} className="bg-sky-700 border border-sky-400 px-3 py-2 rounded-xl font-bold hover:bg-sky-600 flex items-center gap-1">
+            <RefreshCw className="w-3.5 h-3.5" /> Làm mới
+          </button>
+          <button onClick={onSwitchToStudentView} className="bg-white text-sky-900 px-3.5 py-2 rounded-xl font-bold hover:bg-sky-50 shadow transition">
+            👁️ Xem Trang Cá Nhân Học Sinh
+          </button>
+        </div>
+      </div>
+
+      {loading && members.length === 0 ? (
+        <p className="text-slate-500 italic">Đang tải danh sách Tổ...</p>
+      ) : loadError ? (
+        <p className="p-4 bg-rose-50 text-rose-700 border border-rose-200 rounded-xl font-medium">{loadError}</p>
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="bg-white p-5 rounded-2xl border shadow-sm space-y-4 h-fit">
+            <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2 border-b pb-2">
+              <PlusCircle className="w-4 h-4 text-sky-600" /> Nhập Vi Phạm / Khen Thưởng Cho Bạn Trong Tổ
+            </h2>
+            <form onSubmit={handleAdd} className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="font-semibold block mb-1">Tuần học (*):</label>
+                  <input type="number" min="1" max="52" value={weekNumber || ''} onChange={e => setWeekNumber(Math.floor(Number(e.target.value)) || 0)} className="w-full p-2 border rounded-xl font-bold" required />
+                </div>
+                <div>
+                  <label className="font-semibold block mb-1">Ngày cụ thể (*):</label>
+                  <input type="date" value={recordDate} max={todayLocalISO()} onChange={e => setRecordDate(e.target.value)} className="w-full p-2 border rounded-xl" required />
+                </div>
+              </div>
+              <div>
+                <label className="font-semibold block mb-1">Chọn bạn trong Tổ {groupNumber} (*):</label>
+                <select value={selectedStudentId} onChange={e => setSelectedStudentId(e.target.value)} className="w-full p-2 border rounded-xl" required>
+                  <option value="">-- Chọn học sinh --</option>
+                  {members.map(m => <option key={m.id} value={m.id}>{m.full_name} - MSHS: {m.code}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="font-semibold block mb-1">Loại ghi nhận (*):</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button type="button" onClick={() => { setRecordType('violation'); setContent(''); setPointsStr('1'); setUseCustomContent(false); }}
+                    className={`py-2 rounded-xl font-bold transition ${recordType === 'violation' ? 'bg-rose-600 text-white shadow' : 'bg-slate-100 text-slate-600'}`}>⚠️ Vi Phạm (trừ điểm)</button>
+                  <button type="button" onClick={() => { setRecordType('commendation'); setContent(''); setPointsStr('1'); setUseCustomContent(false); }}
+                    className={`py-2 rounded-xl font-bold transition ${recordType === 'commendation' ? 'bg-emerald-600 text-white shadow' : 'bg-slate-100 text-slate-600'}`}>🌟 Khen Thưởng (cộng điểm)</button>
+                </div>
+              </div>
+              <div>
+                <label className="font-semibold block mb-1">Nội dung theo Nội Quy Thi Đua (*):</label>
+                <select value={useCustomContent ? '__custom__' : content} onChange={e => handleSelectRuleContent(e.target.value)} className="w-full p-2 border rounded-xl" required>
+                  <option value="">-- Chọn nội dung --</option>
+                  {COMPETITION_RULES.filter(r => r.type === recordType).map((r, idx) => (
+                    <option key={idx} value={r.content}>{r.content} ({r.type === 'violation' ? '-' : '+'}{r.points}đ)</option>
+                  ))}
+                  <option value="__custom__">✏️ Khác (Tự nhập nội dung, tự nhập điểm)</option>
+                </select>
+              </div>
+              {useCustomContent && (
+                <div>
+                  <label className="font-semibold block mb-1">Nội dung tự nhập:</label>
+                  <input type="text" maxLength={500} placeholder="VD: Không đeo khăn quàng..." value={content} onChange={e => setContent(e.target.value)} className="w-full p-2 border rounded-xl" required />
+                </div>
+              )}
+              <div>
+                <label className="font-semibold block mb-1">Số điểm {recordType === 'violation' ? 'trừ' : 'cộng'} (*):</label>
+                <input type="text" inputMode="numeric" value={pointsStr} readOnly={!useCustomContent}
+                  onChange={e => setPointsStr(e.target.value.replace(/[^0-9]/g, ''))}
+                  className={`w-full p-2 border rounded-xl font-bold ${recordType === 'violation' ? 'text-rose-700' : 'text-emerald-700'} ${!useCustomContent ? 'bg-slate-100' : ''}`} required />
+                {!useCustomContent && content && <p className="text-[11px] text-slate-500 mt-1 italic">* Điểm tự động theo Nội Quy Thi Đua — chọn "Khác" nếu cần nhập tay.</p>}
+              </div>
+              <button type="submit" disabled={saving} className="w-full py-2.5 bg-sky-600 hover:bg-sky-700 text-white font-bold rounded-xl shadow transition disabled:opacity-60">
+                {saving ? 'Đang lưu...' : 'Lưu Điểm Cho Bạn'}
+              </button>
+            </form>
+          </div>
+
+          <div className="space-y-6">
+            <div className="bg-white p-5 rounded-2xl border shadow-sm space-y-3">
+              <div className="flex justify-between items-center flex-wrap gap-2 border-b pb-2">
+                <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2"><Trophy className="w-4 h-4 text-amber-500" /> Tổng Hợp Điểm Tổ {groupNumber}</h2>
+                <select value={viewWeek} onChange={e => setViewWeek(e.target.value)} className="p-1.5 border rounded-xl">
+                  <option value="all">Cả học kỳ</option>
+                  {weeks.map(w => <option key={w} value={String(w)}>Tuần {w}</option>)}
+                </select>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead className="bg-slate-50 font-bold border-b text-slate-700">
+                    <tr>
+                      <th className="p-2 border-r">Họ tên</th>
+                      <th className="p-2 border-r text-center">Trừ</th>
+                      <th className="p-2 border-r text-center">Cộng</th>
+                      <th className="p-2 text-center">{viewWeek === 'all' ? 'Điểm hiện tại' : 'Chênh lệch tuần'}</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {members.map(m => {
+                      const ded = sumOf(m.id, 'violation', shown);
+                      const bon = sumOf(m.id, 'commendation', shown);
+                      return (
+                        <tr key={m.id} className="hover:bg-slate-50">
+                          <td className="p-2 border-r font-semibold">{m.full_name}</td>
+                          <td className="p-2 border-r text-center text-rose-600 font-bold">{ded ? `-${ded}` : '0'}</td>
+                          <td className="p-2 border-r text-center text-emerald-600 font-bold">{bon ? `+${bon}` : '0'}</td>
+                          <td className="p-2 text-center font-black text-indigo-700">{viewWeek === 'all' ? 100 - ded + bon : (bon - ded > 0 ? `+${bon - ded}` : bon - ded)}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="bg-white p-5 rounded-2xl border shadow-sm space-y-3">
+              <h2 className="text-sm font-bold text-slate-800 border-b pb-2">Nhật Ký Thi Đua Tổ {groupNumber} ({shown.length} dòng)</h2>
+              {shown.length === 0 ? (
+                <p className="text-slate-400 italic">Chưa có ghi nhận nào.</p>
+              ) : (
+                <div className="space-y-2 max-h-[520px] overflow-y-auto">
+                  {shown.map(r => {
+                    const who = members.find(m => m.id === r.student_id);
+                    const mine = r.recorded_by_id === String(student.id);
+                    return (
+                      <div key={r.id} className={`p-2.5 rounded-xl border flex justify-between items-start gap-2 ${r.type === 'violation' ? 'bg-rose-50/60 border-rose-200' : 'bg-emerald-50/60 border-emerald-200'}`}>
+                        <div>
+                          <span className="font-bold">{who?.full_name || '—'}</span>
+                          <span className="text-slate-500"> · Tuần {r.week_number}{r.record_date ? ` · ${formatDateVN(r.record_date)}` : ''}</span>
+                          <p className="text-slate-700">{r.content}</p>
+                          <p className="text-[10px] text-slate-400">Người ghi: {r.recorded_by || 'Lớp trưởng'}</p>
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <span className={`font-black ${r.type === 'violation' ? 'text-rose-600' : 'text-emerald-600'}`}>{r.type === 'violation' ? '-' : '+'}{r.points}đ</span>
+                          {mine && (
+                            <button onClick={() => handleDelete(r)} title="Xóa dòng nhập nhầm" className="p-1 text-rose-600 hover:bg-rose-100 rounded">
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              <p className="text-[11px] text-slate-500 italic">* Em chỉ xóa được dòng do chính em nhập. Dòng do Lớp trưởng/GVCN ghi, nếu sai em báo lại để sửa.</p>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1684,6 +2217,33 @@ function TreasurerPortal({ student, onSwitchToStudentView }: { student: Student;
   const paidCountOf = (feeId: string) => classStudents.filter(s => isPaid(s.id, feeId)).length;
 
   // ---------- (1) ĐÃ NỘP / CHƯA NỘP ----------
+  // Thủ quỹ tạo / xóa khoản thu, đánh dấu "Đã xong" (khôi phục từ bản cũ).
+  const [newFee, setNewFee] = useState({ title: '', amount: '', deadline: '' });
+  const handleCreateFeeItem = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const amount = parseMoney(newFee.amount);
+    if (!newFee.title.trim() || !amount) { alert('Vui lòng nhập Nội dung khoản thu và Số tiền / học sinh.'); return; }
+    const { error } = await supabase.rpc('treasurer_create_fee_item', {
+      ...auth(), p_title: newFee.title.trim(), p_amount: amount, p_deadline: newFee.deadline || null,
+    });
+    if (error) { alert('Lỗi tạo khoản thu: ' + rpcErrorText(error.message, 'treasurer_create_fee_item')); return; }
+    setNewFee({ title: '', amount: '', deadline: '' });
+    fetchFeeData();
+  };
+  const handleSetFeeCompleted = async (f: FeeItem) => {
+    const next = !f.is_completed;
+    const { error } = await supabase.rpc('treasurer_set_fee_completed', { ...auth(), p_fee_item_id: f.id, p_is_completed: next });
+    if (error) { alert('Lỗi cập nhật: ' + rpcErrorText(error.message, 'treasurer_set_fee_completed')); return; }
+    setFeeItems(prev => prev.map(x => (x.id === f.id ? { ...x, is_completed: next } : x)));
+  };
+  const handleRemoveFeeItem = async (f: FeeItem) => {
+    const paid = paidCountOf(f.id);
+    if (!window.confirm(`Xóa khoản thu "${f.title}"?` + (paid ? `\n${paid} bạn đã được đánh dấu "Đã nộp" — trạng thái này sẽ bị xóa theo.` : '') + `\n(Các dòng đã ghi trong Sổ quỹ vẫn được giữ nguyên.)`)) return;
+    const { error } = await supabase.rpc('treasurer_remove_fee_item', { ...auth(), p_fee_item_id: f.id });
+    if (error) { alert('Lỗi xóa khoản thu: ' + rpcErrorText(error.message, 'treasurer_remove_fee_item')); return; }
+    fetchFeeData();
+  };
+
   const handleToggle = async (target: Student, feeId: string) => {
     const current = isPaid(target.id, feeId);
     if (current && !window.confirm(`Chuyển ${target.full_name} về "Chưa nộp"?`)) return;
@@ -1866,8 +2426,27 @@ function TreasurerPortal({ student, onSwitchToStudentView }: { student: Student;
 
           {/* ===== (1) ĐÃ NỘP / CHƯA NỘP ===== */}
           {tab === 'payments' && (
+            <form onSubmit={handleCreateFeeItem} className="bg-white p-4 rounded-2xl border shadow-sm grid grid-cols-1 md:grid-cols-5 gap-2 items-end">
+              <div className="md:col-span-2">
+                <label className="font-semibold block mb-1">➕ Tạo khoản thu mới (*):</label>
+                <input type="text" maxLength={200} placeholder="VD: Quỹ lớp học kỳ 2" value={newFee.title} onChange={e => setNewFee({ ...newFee, title: e.target.value })} className="w-full p-2 border rounded-xl" />
+              </div>
+              <div>
+                <label className="font-semibold block mb-1">Số tiền / HS (*):</label>
+                <input type="text" inputMode="numeric" placeholder="VD: 100.000" value={newFee.amount}
+                  onChange={e => { const d = e.target.value.replace(/[^0-9]/g, ''); setNewFee({ ...newFee, amount: d ? Number(d).toLocaleString('vi-VN') : '' }); }}
+                  className="w-full p-2 border rounded-xl font-bold" />
+              </div>
+              <div>
+                <label className="font-semibold block mb-1">Hạn nộp:</label>
+                <input type="date" value={newFee.deadline} onChange={e => setNewFee({ ...newFee, deadline: e.target.value })} className="w-full p-2 border rounded-xl" />
+              </div>
+              <button type="submit" className="py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow">Tạo Khoản Thu</button>
+            </form>
+          )}
+          {tab === 'payments' && (
             feeItems.length === 0 ? (
-              <p className="p-4 bg-white border rounded-2xl text-slate-500 italic">Giáo viên chủ nhiệm chưa tạo khoản thu nào.</p>
+              <p className="p-4 bg-white border rounded-2xl text-slate-500 italic">Chưa có khoản thu nào.</p>
             ) : (
               <div className="bg-white p-5 rounded-2xl border shadow-sm space-y-4">
                 <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2 border-b pb-2">
@@ -1880,10 +2459,24 @@ function TreasurerPortal({ student, onSwitchToStudentView }: { student: Student;
                       onClick={() => setSelectedFeeId(f.id)}
                       className={`px-3 py-2 rounded-xl font-bold transition ${f.id === selectedFeeId ? 'bg-emerald-600 text-white shadow' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
                     >
-                      {f.title}
+                      {f.title}{f.is_completed ? ' ✓' : ''}
                     </button>
                   ))}
                 </div>
+                {selectedFee && (
+                  <div className="flex flex-wrap items-center gap-2">
+                    {selectedFee.is_completed
+                      ? <span className="px-3 py-1.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 font-semibold">✅ Khoản thu này ĐÃ XONG</span>
+                      : <span className="px-3 py-1.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 font-semibold">⏳ Đang thu</span>}
+                    <button onClick={() => handleSetFeeCompleted(selectedFee)}
+                      className={`px-3 py-1.5 rounded-xl font-bold border ${selectedFee.is_completed ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'}`}>
+                      {selectedFee.is_completed ? 'Mở Lại' : '✔ Đánh dấu Đã Xong'}
+                    </button>
+                    <button onClick={() => handleRemoveFeeItem(selectedFee)} className="px-3 py-1.5 rounded-xl font-bold border border-rose-200 bg-rose-50 text-rose-700 inline-flex items-center gap-1">
+                      <Trash2 className="w-3.5 h-3.5" /> Xóa khoản thu
+                    </button>
+                  </div>
+                )}
 
                 {selectedFee && (
                   <>
@@ -1963,7 +2556,7 @@ function TreasurerPortal({ student, onSwitchToStudentView }: { student: Student;
                         </tbody>
                       </table>
                     </div>
-                    <p className="text-[11px] text-slate-500 italic">* Thay đổi được lưu ngay; học sinh thấy trạng thái của mình ở mục "Các Khoản Thu & Quỹ Lớp". Thủ quỹ không tạo/xóa được khoản thu — việc này do GVCN thực hiện.</p>
+                    <p className="text-[11px] text-slate-500 italic">* Thay đổi được lưu ngay; học sinh thấy trạng thái của mình ở mục "Các Khoản Thu & Quỹ Lớp". Khoản thu do Thủ quỹ hoặc GVCN tạo đều hiện ở đây.</p>
                   </>
                 )}
               </div>
@@ -2157,6 +2750,7 @@ function FundLedgerTable({ rows, feeItems, onDelete }: {
                 <td className="p-2 border-r">
                   {t.description}
                   {fee && <span className="ml-1 text-[10px] bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded">{fee.title}</span>}
+                  {t.created_by && <span className="block text-[10px] text-slate-400">Người ghi: {t.created_by}</span>}
                 </td>
                 <td className="p-2 border-r text-right font-bold text-emerald-700 whitespace-nowrap">{t.tx_type === 'income' ? formatMoney(t.amount) : ''}</td>
                 <td className="p-2 border-r text-right font-bold text-rose-700 whitespace-nowrap">{t.tx_type === 'expense' ? formatMoney(t.amount) : ''}</td>
@@ -2179,7 +2773,8 @@ function FundLedgerTable({ rows, feeItems, onDelete }: {
 
 // ==================== 5. BẢNG ĐIỀU KHIỂN GIÁO VIÊN CHỦ NHIỆM ====================
 function TeacherDashboard({ teacher }: { teacher: Teacher }) {
-  const [activeTab, setActiveTab] = useState<'students' | 'fees' | 'announcements' | 'reports' | 'groups' | 'oral'>('students');
+  const [activeTab, setActiveTab] = useState<'students' | 'fees' | 'announcements' | 'reports' | 'groups' | 'rules' | 'oral'>('students');
+  const [groupWeeklyScores, setGroupWeeklyScores] = useState<GroupWeeklyScore[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
   const [feeItems, setFeeItems] = useState<FeeItem[]>([]);
   const [feePayments, setFeePayments] = useState<FeePayment[]>([]);
@@ -2205,6 +2800,7 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
   const [feeTitle, setFeeTitle] = useState('');
   const [feeAmount, setFeeAmount] = useState('');
   const [feeDeadline, setFeeDeadline] = useState('');
+  const [gvTx, setGvTx] = useState({ type: 'expense' as 'income' | 'expense', date: todayLocalISO(), amount: '', desc: '' });
 
   const [annTitle, setAnnTitle] = useState('');
   const [annContent, setAnnContent] = useState('');
@@ -2246,6 +2842,10 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
       .from('class_fund_transactions').select('*').eq('teacher_id', teacher.id)
       .order('tx_date', { ascending: false }).order('created_at', { ascending: false });
     setFundTx(fErr ? null : normalizeFundTx(fData));
+
+    const { data: gData } = await supabase
+      .from('group_weekly_scores').select('*').eq('teacher_id', teacher.id).order('week_number', { ascending: true });
+    if (gData) setGroupWeeklyScores((gData as any[]).map(r => ({ ...r, score: Number(r.score) })));
   };
 
   // Tìm các học sinh KHÁC đang giữ chức vụ "chỉ 1 người" (để tránh 2 Lớp phó học tập, 2 Lớp trưởng...).
@@ -2587,6 +3187,30 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
     XLSX.writeFile(wb, `KhoanThu.xlsx`);
   };
 
+  // GVCN tự ghi thu / chi vào sổ quỹ (như trước đây GV vẫn ghi các khoản chi của lớp).
+  const handleTeacherAddFundTx = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const amount = parseMoney(gvTx.amount);
+    if (!amount) { alert('Số tiền không hợp lệ.'); return; }
+    if (!gvTx.date || gvTx.date > todayLocalISO()) { alert('Ngày không hợp lệ (không được sau hôm nay).'); return; }
+    if (!gvTx.desc.trim()) { alert('Vui lòng ghi nội dung thu/chi.'); return; }
+    const { error } = await supabase.from('class_fund_transactions').insert([{
+      teacher_id: String(teacher.id), tx_type: gvTx.type, amount, tx_date: gvTx.date,
+      description: gvTx.desc.trim(), created_by: `${teacher.full_name} (GVCN)`,
+    }]);
+    if (error) { alert('Lỗi ghi sổ quỹ: ' + error.message); return; }
+    setGvTx({ ...gvTx, amount: '', desc: '' });
+    fetchData();
+  };
+
+  // Đánh dấu khoản thu đã hoàn thành / mở lại (cột is_completed có sẵn trong bảng fee_items).
+  const handleToggleFeeCompleted = async (f: FeeItem) => {
+    const next = !f.is_completed;
+    const { error } = await supabase.from('fee_items').update({ is_completed: next }).eq('id', f.id);
+    if (error) { alert('Lỗi cập nhật: ' + error.message); return; }
+    setFeeItems(prev => prev.map(x => (x.id === f.id ? { ...x, is_completed: next } : x)));
+  };
+
   const handleDeleteFundTx = async (t: FundTransaction) => {
     if (!confirm(`Xóa dòng sổ quỹ: ${t.tx_type === 'income' ? 'THU' : 'CHI'} ${formatMoney(t.amount)} ngày ${formatDateVN(t.tx_date)} — "${t.description}"?`)) return;
     const { error } = await supabase.from('class_fund_transactions').delete().eq('id', t.id);
@@ -2622,6 +3246,7 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
         'Loại': r.type === 'violation' ? 'Vi phạm' : 'Khen thưởng',
         'Nội dung': r.content,
         'Điểm': r.points,
+        'Người ghi': r.recorded_by || 'Lớp trưởng',
       };
     });
     const ws = XLSX.utils.json_to_sheet(data);
@@ -2732,6 +3357,7 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
           <button onClick={() => setActiveTab('groups')} className={`px-4 py-2 rounded-xl font-bold transition ${activeTab === 'groups' ? 'bg-indigo-600 text-white shadow' : 'bg-slate-100'}`}>🗂️ Phân Chia Tổ & Ban Cán Sự</button>
           <button onClick={() => setActiveTab('fees')} className={`px-4 py-2 rounded-xl font-bold transition ${activeTab === 'fees' ? 'bg-indigo-600 text-white shadow' : 'bg-slate-100'}`}>💰 Quản Lý Khoản Thu</button>
           <button onClick={() => setActiveTab('reports')} className={`px-4 py-2 rounded-xl font-bold transition ${activeTab === 'reports' ? 'bg-indigo-600 text-white shadow' : 'bg-slate-100'}`}>📊 Thi Đua & Báo Cáo</button>
+          <button onClick={() => setActiveTab('rules')} className={`px-4 py-2 rounded-xl font-bold transition ${activeTab === 'rules' ? 'bg-indigo-600 text-white shadow' : 'bg-slate-100'}`}>📖 Nội Quy Thi Đua</button>
           <button onClick={() => setActiveTab('announcements')} className={`px-4 py-2 rounded-xl font-bold transition ${activeTab === 'announcements' ? 'bg-indigo-600 text-white shadow' : 'bg-slate-100'}`}>📢 Thông Báo & Dặn Dò</button>
           <button onClick={() => { setActiveTab('oral'); setOralTabOpened(true); }} className={`px-4 py-2 rounded-xl font-bold transition ${activeTab === 'oral' ? 'bg-indigo-600 text-white shadow' : 'bg-slate-100'}`}>📝 Điểm Kiểm Tra Miệng</button>
         </div>
@@ -2797,9 +3423,9 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
                       </select>
                     </td>
                     <td className="p-3 border-r text-center">
-                      {s.survey_completed ? (
+                      {(s.survey_completed || hasSharingInfo(s.survey_info)) ? (
                         <button onClick={() => setSelectedStudentForModal(s)} className="bg-emerald-100 text-emerald-800 px-2.5 py-1 rounded-full font-bold hover:bg-emerald-200">
-                          ✓ Xem Thông Tin Điều Tra
+                          ✓ Xem Thông Tin Điều Tra{hasSharingInfo(s.survey_info) ? ' 💛' : ''}
                         </button>
                       ) : (
                         <span className="text-slate-400 italic">Chưa nộp</span>
@@ -2960,6 +3586,7 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
                   <th className="p-3 border-r text-center">Hạn Hoàn Thành</th>
                   <th className="p-3 border-r text-center">Đã Nộp</th>
                   <th className="p-3 border-r text-right">Đã Thu</th>
+                  <th className="p-3 border-r text-center">Hoàn Thành</th>
                   <th className="p-3 text-center">Xóa</th>
                 </tr>
               </thead>
@@ -2973,6 +3600,12 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
                       <td className="p-3 border-r text-center">{f.deadline || 'Không có'}</td>
                       <td className="p-3 border-r text-center font-bold">{paid}/{students.length}</td>
                       <td className="p-3 border-r text-right font-bold text-emerald-700">{(paid * Number(f.amount || 0)).toLocaleString()} VNĐ</td>
+                      <td className="p-3 border-r text-center">
+                        <button onClick={() => handleToggleFeeCompleted(f)}
+                          className={`px-2.5 py-1 rounded-full font-bold ${f.is_completed ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-600'}`}>
+                          {f.is_completed ? '✓ Đã xong' : 'Đang thu'}
+                        </button>
+                      </td>
                       <td className="p-3 text-center">
                         <button onClick={() => handleDeleteFeeItem(f)} title="Xóa khoản thu" className="p-1.5 text-rose-600 hover:bg-rose-50 rounded">
                           <Trash2 className="w-4 h-4 inline" />
@@ -2982,7 +3615,7 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
                   );
                 })}
                 {feeItems.length === 0 && (
-                  <tr><td colSpan={6} className="p-4 text-center text-slate-400 italic">Chưa có khoản thu nào.</td></tr>
+                  <tr><td colSpan={7} className="p-4 text-center text-slate-400 italic">Chưa có khoản thu nào.</td></tr>
                 )}
               </tbody>
             </table>
@@ -2993,10 +3626,22 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
           ) : (
             <div className="bg-white p-5 rounded-2xl border shadow-sm space-y-3">
               <div className="flex justify-between items-center flex-wrap gap-3">
-                <h2 className="font-bold text-slate-800 text-sm">📒 Sổ Quỹ Lớp (Thủ quỹ ghi thu – chi)</h2>
+                <h2 className="font-bold text-slate-800 text-sm">📒 Sổ Quỹ Lớp (Thủ quỹ / GVCN ghi thu – chi)</h2>
                 <button onClick={handleExportFund} disabled={fundTx.length === 0} className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-2 rounded-xl font-bold disabled:opacity-50">📥 Xuất Excel Sổ Quỹ</button>
               </div>
               {(() => { const f = summarizeFund(fundTx); return <FundSummaryCards income={f.income} expense={f.expense} balance={f.balance} />; })()}
+              <form onSubmit={handleTeacherAddFundTx} className="grid grid-cols-1 md:grid-cols-6 gap-2 p-3 bg-slate-50 border rounded-xl">
+                <select value={gvTx.type} onChange={e => setGvTx({ ...gvTx, type: e.target.value as 'income' | 'expense' })} className="p-2 border rounded-xl font-bold">
+                  <option value="expense">➖ Chi</option>
+                  <option value="income">➕ Thu</option>
+                </select>
+                <input type="date" value={gvTx.date} max={todayLocalISO()} onChange={e => setGvTx({ ...gvTx, date: e.target.value })} className="p-2 border rounded-xl" required />
+                <input type="text" inputMode="numeric" placeholder="Số tiền" value={gvTx.amount}
+                  onChange={e => { const d = e.target.value.replace(/[^0-9]/g, ''); setGvTx({ ...gvTx, amount: d ? Number(d).toLocaleString('vi-VN') : '' }); }}
+                  className="p-2 border rounded-xl font-bold" required />
+                <input type="text" maxLength={500} placeholder="Nội dung (VD: Mua phấn màu)" value={gvTx.desc} onChange={e => setGvTx({ ...gvTx, desc: e.target.value })} className="p-2 border rounded-xl md:col-span-2" required />
+                <button type="submit" className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow py-2">Ghi Sổ</button>
+              </form>
               <FundLedgerTable rows={withRunningBalance(fundTx)} feeItems={feeItems} onDelete={handleDeleteFundTx} />
             </div>
           )}
@@ -3007,7 +3652,7 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
         <div className="space-y-6">
           <div className="bg-white p-5 rounded-2xl border shadow-sm space-y-3">
             <div className="flex justify-between items-center flex-wrap gap-3">
-              <h2 className="font-bold text-slate-800 text-sm">Nhật Ký Vi Phạm / Khen Thưởng Toàn Lớp (Lớp trưởng nộp)</h2>
+              <h2 className="font-bold text-slate-800 text-sm">Nhật Ký Vi Phạm / Khen Thưởng Toàn Lớp (Lớp trưởng & Tổ trưởng nhập)</h2>
               <div className="flex gap-2 items-center">
                 <select value={selectedWeek} onChange={e => setSelectedWeek(e.target.value)} className="p-2 border rounded-xl">
                   <option value="all">Tất cả các tuần</option>
@@ -3029,7 +3674,8 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
                     <th className="p-2 border-r text-center">Tổ</th>
                     <th className="p-2 border-r">Loại</th>
                     <th className="p-2 border-r">Nội dung vi phạm / khen thưởng</th>
-                    <th className="p-2 text-center">Điểm</th>
+                    <th className="p-2 border-r text-center">Điểm</th>
+                    <th className="p-2">Người ghi</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y">
@@ -3048,9 +3694,10 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
                             {r.type === 'violation' ? 'Vi phạm' : 'Khen thưởng'}
                           </td>
                           <td className="p-2 border-r">{r.content}</td>
-                          <td className={`p-2 text-center font-bold ${r.type === 'violation' ? 'text-rose-600' : 'text-emerald-600'}`}>
+                          <td className={`p-2 border-r text-center font-bold ${r.type === 'violation' ? 'text-rose-600' : 'text-emerald-600'}`}>
                             {r.type === 'violation' ? `-${r.points}` : `+${r.points}`}
                           </td>
+                          <td className="p-2 text-slate-500">{r.recorded_by || 'Lớp trưởng'}</td>
                         </tr>
                       );
                     })}
@@ -3058,6 +3705,11 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
               </table>
               {studentRecords.length === 0 && <p className="text-slate-400 italic p-3">Chưa có ghi nhận nào từ Lớp trưởng.</p>}
             </div>
+          </div>
+
+          <div className="bg-white p-5 rounded-2xl border shadow-sm space-y-3">
+            <h2 className="font-bold text-slate-800 text-sm flex items-center gap-2"><Trophy className="w-4 h-4 text-amber-500" /> Bảng Thi Đua Các Tổ Theo Từng Tuần (Lớp trưởng báo cáo)</h2>
+            <GroupScoresTable scores={groupWeeklyScores} />
           </div>
 
           <div className="bg-white p-5 rounded-2xl border shadow-sm space-y-3">
@@ -3148,6 +3800,21 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
       {oralTabOpened && (
         <div className={activeTab === 'oral' ? '' : 'hidden'}>
           <OralScoresTab teacher={teacher} />
+        </div>
+      )}
+
+      {activeTab === 'rules' && (
+        <div className="bg-white p-6 rounded-2xl border shadow-sm space-y-5">
+          <div className="flex justify-between items-start flex-wrap gap-3 border-b pb-3">
+            <div>
+              <h2 className="text-base font-bold text-slate-900 uppercase">Bảng Quy Định & Bảng Điểm Rèn Luyện Chi Tiết</h2>
+              <p className="text-slate-500 text-[11px] mt-1">Nội dung này giống hệt trang học sinh ("Xem Nội Quy Thi Đua").</p>
+            </div>
+            <button onClick={downloadCompetitionRulesAsWord} className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl font-bold shadow shrink-0">
+              📄 Tải Về File Word
+            </button>
+          </div>
+          <CompetitionRulesContent />
         </div>
       )}
 
@@ -3246,6 +3913,22 @@ function TeacherDashboard({ teacher }: { teacher: Teacher }) {
                     🔒 <strong>Thông điệp bí mật:</strong> {selectedStudentForModal.survey_info.secret_message || 'Không có'}
                   </p>
                 </div>
+
+                {hasSharingInfo(selectedStudentForModal.survey_info) && (
+                  <div className="bg-amber-50 p-3 rounded-xl space-y-1.5 border border-amber-200">
+                    <h3 className="font-bold text-amber-800 uppercase">5. Góc Chia Sẻ 🔒</h3>
+                    <p>• <strong>Khó khăn về điều kiện học tập:</strong> {selectedStudentForModal.survey_info.family_difficulties || 'Không có'}</p>
+                    <p>• <strong>Điều muốn thầy/cô biết về gia đình:</strong> {selectedStudentForModal.survey_info.family_share || 'Không có'}</p>
+                    <p>• <strong>Nguyện vọng hỗ trợ (học bổng/sách vở/tư vấn):</strong> {selectedStudentForModal.survey_info.support_request || 'Không có'}</p>
+                    <p>• <strong>Mức độ an tâm khi ở nhà:</strong> {selectedStudentForModal.survey_info.home_comfort_level || 'Chưa rõ'}</p>
+                    <p>• <strong>Mức độ cần học bổng/hỗ trợ:</strong> {selectedStudentForModal.survey_info.scholarship_need || 'Chưa chọn'}</p>
+                    <p>• <strong>Khó khăn cụ thể nếu nhận hỗ trợ:</strong> {selectedStudentForModal.survey_info.scholarship_specific_need || 'Không có'}</p>
+                    <p>• <strong>Khó khăn đang đối mặt & nỗ lực vượt qua:</strong> {selectedStudentForModal.survey_info.difficulty_and_effort || 'Không có'}</p>
+                    <p className="text-rose-700 bg-rose-50 p-2 rounded-lg font-medium">
+                      🔒 <strong>Điều khó nói trước đám đông (chỉ GVCN biết):</strong> {selectedStudentForModal.survey_info.private_family_note || 'Không có'}
+                    </p>
+                  </div>
+                )}
               </div>
             ) : (
               <p className="text-slate-400 italic">Học sinh chưa hoàn thành phiếu khảo sát.</p>
